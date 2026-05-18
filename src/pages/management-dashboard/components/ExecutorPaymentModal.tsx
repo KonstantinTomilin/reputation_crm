@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { formatGroupedAmounts, formatMoney, groupAmountsByCurrency } from '@/lib/currency';
 import type { CRMLink } from '@/mocks/crm';
 
 interface ExecutorPaymentModalProps {
@@ -52,6 +53,11 @@ export default function ExecutorPaymentModal({ executorId, executorName, linksLi
   const totalSelected = doneLinks
     .filter((l) => selectedIds.has(l.id))
     .reduce((sum, l) => sum + l.executorCost, 0);
+  const selectedByCurrency = groupAmountsByCurrency(
+    doneLinks
+      .filter((l) => selectedIds.has(l.id))
+      .map((l) => ({ amount: l.executorCost, currency: mockProjects.find((p) => p.id === l.projectId)?.currency }))
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -83,7 +89,9 @@ export default function ExecutorPaymentModal({ executorId, executorName, linksLi
                 </button>
                 <span className="text-xs text-gray-500">
                   Выбрано: <span className="font-bold text-gray-800">{selectedIds.size}</span> ·{' '}
-                  <span className="font-bold text-gray-800">{totalSelected.toLocaleString('ru')} ₽</span>
+                  <span className="font-bold text-gray-800">
+                    {selectedIds.size > 0 ? formatGroupedAmounts(selectedByCurrency) : formatMoney(totalSelected, 'RUB')}
+                  </span>
                 </span>
               </div>
 
@@ -114,7 +122,9 @@ export default function ExecutorPaymentModal({ executorId, executorName, linksLi
                         <td className="px-3 py-2 text-xs text-blue-900 font-mono truncate max-w-[200px]">{l.url}</td>
                         <td className="px-3 py-2 text-xs text-gray-600">{mockProjects.find((p) => p.id === l.projectId)?.name || '—'}</td>
                         <td className="px-3 py-2"><StatusBadge status={l.status} type="link" /></td>
-                        <td className="px-3 py-2 text-xs font-semibold">{l.executorCost.toLocaleString('ru')} ₽</td>
+                        <td className="px-3 py-2 text-xs font-semibold">
+                          {formatMoney(l.executorCost, mockProjects.find((p) => p.id === l.projectId)?.currency)}
+                        </td>
                         <td className="px-3 py-2">
                           {l.executorPaid ? (
                             <span className="text-xs text-green-600"><i className="ri-checkbox-circle-line" /> Да</span>
@@ -133,7 +143,10 @@ export default function ExecutorPaymentModal({ executorId, executorName, linksLi
 
         <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
           <div className="text-sm text-gray-600">
-            К оплате: <span className="font-bold text-gray-800">{totalSelected.toLocaleString('ru')} ₽</span>
+            К оплате:{' '}
+            <span className="font-bold text-gray-800">
+              {selectedIds.size > 0 ? formatGroupedAmounts(selectedByCurrency) : formatMoney(totalSelected, 'RUB')}
+            </span>
           </div>
           <div className="flex gap-2">
             <button

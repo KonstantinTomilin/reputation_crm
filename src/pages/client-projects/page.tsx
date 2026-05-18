@@ -3,21 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import type { CRMProject } from '@/mocks/crm';
-import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
 
 type SortField = 'name' | 'totalLinks' | 'successRate' | 'deadline';
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'all' | 'активный' | 'тестирование' | 'завершён' | 'остановлен';
 
 export default function ClientProjectsPage() {
-  const crm = useCRM();
+  const scope = useRoleScope();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
 
-  const projectsData = crm.projects;
+  const projectsData = scope.projects;
   const filtered = projectsData
     .filter((p) => {
       const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());

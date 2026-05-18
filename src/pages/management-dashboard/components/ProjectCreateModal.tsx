@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useCRM } from '@/context/CRMContext';
+import { formatMoney } from '@/lib/currency';
 import type { CRMClient, CRMUser } from '@/mocks/crm';
 import ClientCreateModal from './ClientCreateModal';
 
@@ -336,7 +337,7 @@ export default function ProjectCreateModal({ clients, executors, onClose, onSave
                     Найдено: <span className="font-bold text-gray-700">{parsedLinks.length}</span> ссылок
                   </span>
                   <span className="text-xs text-gray-400">
-                    Общая стоимость: <span className="font-bold text-gray-700">{totalCost.toLocaleString('ru')} ₽</span>
+                    Общая стоимость: <span className="font-bold text-gray-700">{formatMoney(totalCost, currency)}</span>
                   </span>
                 </div>
               </div>
@@ -417,7 +418,7 @@ export default function ProjectCreateModal({ clients, executors, onClose, onSave
           {step === 'links' && (
             <div className="text-sm text-gray-500">
               <span className="font-semibold text-gray-800">{parsedLinks.length}</span> ссылок ·{' '}
-              <span className="font-semibold text-gray-800">{totalCost.toLocaleString('ru')} ₽</span>
+              <span className="font-semibold text-gray-800">{formatMoney(totalCost, currency)}</span>
             </div>
           )}
           <div className="flex items-center gap-2 ml-auto">

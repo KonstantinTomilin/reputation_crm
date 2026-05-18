@@ -3,19 +3,19 @@ import CRMLayout from '@/components/feature/CRMLayout';
 import KPICard from '@/components/base/KPICard';
 import ClientProjectsTable from './components/ClientProjectsTable';
 import DynamicsChart from './components/DynamicsChart';
-import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
 
 export default function ClientDashboardPage() {
-  const crm = useCRM();
-  const myProjects = crm.projects;
+  const scope = useRoleScope();
+  const myProjects = scope.projects;
+  const myLinks = scope.links;
 
-  // Compute stats from real data instead of mock
-  const totalLinks = crm.links.length;
-  const inProgress = crm.links.filter((l) => l.status === 'в работе').length;
-  const removed = crm.links.filter((l) => l.status === 'удалено' || l.status.startsWith('деиндексировано')).length;
-  const activeProjects = crm.projects.filter((p) => p.status === 'в работе').length;
+  const totalLinks = myLinks.length;
+  const inProgress = myLinks.filter((l) => l.status === 'в работе').length;
+  const removed = myLinks.filter((l) => l.status === 'удалено' || l.status.startsWith('деиндексировано')).length;
+  const activeProjects = myProjects.filter((p) => p.status === 'в работе').length;
   const avgDays = totalLinks > 0
-    ? Math.round(crm.links.filter((l) => l.endDate && l.startDate)
+    ? Math.round(myLinks.filter((l) => l.endDate && l.startDate)
       .reduce((sum, l) => sum + (new Date(l.endDate!).getTime() - new Date(l.startDate!).getTime()) / 86400000, 0) / totalLinks)
     : 0;
 

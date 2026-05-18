@@ -3,6 +3,7 @@ import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
 import { useCurrentExecutorId } from '@/hooks/useCurrentExecutor';
+import { formatMoney } from '@/lib/currency';
 import type { CRMLink, LinkStatus } from '@/mocks/crm';
 
 const linkStatusOptions: { value: LinkStatus | 'all'; label: string }[] = [
@@ -293,7 +294,7 @@ export default function ExecutorTasksPage() {
                       </td>
                       <td className="px-4 py-3"><StatusBadge status={link.status} type="link" /></td>
                       <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{(link.geo ? link.geo.split(',')[0] : '—')}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-700 whitespace-nowrap text-sm">{link.executorCost.toLocaleString('ru')} ₽</td>
+                      <td className="px-4 py-3 text-right font-semibold text-gray-700 whitespace-nowrap text-sm">{formatMoney(link.executorCost, project?.currency)}</td>
                       <td className="px-4 py-3">
                         {link.executorPaid ? (
                           <span className="inline-flex items-center gap-1 text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full whitespace-nowrap">

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { formatMoney, normalizeCurrency } from '@/lib/currency';
 import type { CRMAudit, CRMLink } from '@/mocks/crm';
 
 export type AuditReviewStatus = 'на согласовании' | 'согласовано' | 'отправлено клиенту' | 'отклонён';
@@ -282,7 +283,7 @@ export default function AuditsTab({ linksList, onUpdateLink, onAddComment, onGen
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600 font-mono">{audit.removalDaysEstimate || audit.deindexDaysEstimate} дн</td>
                     <td className="px-4 py-3 text-sm text-gray-700">
-                      {totalCost.toLocaleString('ru')} {audit.currency || '₽'}
+                      {formatMoney(totalCost, normalizeCurrency(audit.currency || undefined))}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{author?.fullName || '—'}</td>
                     <td className="px-4 py-3">
@@ -397,7 +398,7 @@ export default function AuditsTab({ linksList, onUpdateLink, onAddComment, onGen
                       <div><span className="text-gray-400">Вероятность удаления:</span> {clientReportModal.audit.audit.removalProbability}%</div>
                       <div><span className="text-gray-400">Вероятность деиндексации:</span> {clientReportModal.audit.audit.deindexProbability}%</div>
                       <div><span className="text-gray-400">Срок:</span> {clientReportModal.audit.audit.removalDaysEstimate} дн</div>
-                      <div><span className="text-gray-400">Стоимость:</span> {Object.values(clientReportModal.audit.audit.costPerSE).reduce((a, b) => a + b, 0).toLocaleString('ru')} {clientReportModal.audit.audit.currency || '₽'}</div>
+                      <div><span className="text-gray-400">Стоимость:</span> {formatMoney(Object.values(clientReportModal.audit.audit.costPerSE).reduce((a, b) => a + b, 0), normalizeCurrency(clientReportModal.audit.audit.currency || undefined))}</div>
                     </div>
                   </div>
 
@@ -412,7 +413,7 @@ export default function AuditsTab({ linksList, onUpdateLink, onAddComment, onGen
                       ].filter((se) => se.value > 0).map((se) => (
                         <div key={se.label} className="flex justify-between py-1 border-b border-gray-100">
                           <span>{se.label}</span>
-                          <span className="font-semibold">{se.value.toLocaleString('ru')} {clientReportModal.audit.audit.currency || '₽'}</span>
+                          <span className="font-semibold">{formatMoney(se.value, normalizeCurrency(clientReportModal.audit.audit.currency || undefined))}</span>
                         </div>
                       ))}
                     </div>

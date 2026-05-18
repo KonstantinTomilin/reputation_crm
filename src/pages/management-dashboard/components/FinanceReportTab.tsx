@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useCallback } from 'react';
 // @ts-expect-error no types for html2pdf.js
 import html2pdf from 'html2pdf.js';
 import type { CRMLink, CRMPayment } from '@/mocks/crm';
+import { formatMoney, getCurrencySymbol } from '@/lib/currency';
 
 interface Props {
   links: CRMLink[];
@@ -28,6 +29,7 @@ const deliveredStatuses = [
   'деиндексировано bing',
   'частично деиндексировано',
 ];
+const RUB_SYMBOL = getCurrencySymbol('RUB');
 
 function getPeriodFilter(
   d: Date,
@@ -265,7 +267,7 @@ export default function FinanceReportTab({ links, payments }: Props) {
         </div>
         <div className="flex-1 min-w-0">
           <div className="text-xs font-semibold uppercase tracking-wider opacity-80">{title}</div>
-          <div className="text-2xl font-bold text-gray-800 truncate">{value.toLocaleString('ru')} ₽</div>
+          <div className="text-2xl font-bold text-gray-800 truncate">{formatMoney(value, 'RUB')}</div>
         </div>
       </div>
       {compareEnabled && compareValue !== undefined && compareValue !== null && (
@@ -273,7 +275,7 @@ export default function FinanceReportTab({ links, payments }: Props) {
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-gray-500 truncate">{comparePeriodLabel}</span>
             <span className={`text-xs font-bold whitespace-nowrap ${diffStyle(value, compareValue)}`}>
-              {compareValue.toLocaleString('ru')} ₽ ({diffText(value, compareValue)})
+              {formatMoney(compareValue, 'RUB')} ({diffText(value, compareValue)})
             </span>
           </div>
         </div>
@@ -454,14 +456,14 @@ export default function FinanceReportTab({ links, payments }: Props) {
                     <tr key={row.label} className="border-b border-slate-50 hover:bg-slate-50/30 transition-colors">
                       <td className="px-4 py-3 text-sm font-medium text-gray-700">{row.label}</td>
                       <td className="px-4 py-3 text-sm text-gray-800 text-right font-semibold">
-                        {row.isPercent ? `${row.current}%` : `${row.current.toLocaleString('ru')} ${row.label.includes('Доля') ? '%' : '₽'}`}
+                        {row.isPercent ? `${row.current}%` : `${row.current.toLocaleString('ru')} ${row.label.includes('Доля') ? '%' : RUB_SYMBOL}`}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 text-right">
-                        {row.isPercent ? `${row.prev}%` : `${row.prev.toLocaleString('ru')} ${row.label.includes('Доля') ? '%' : '₽'}`}
+                        {row.isPercent ? `${row.prev}%` : `${row.prev.toLocaleString('ru')} ${row.label.includes('Доля') ? '%' : RUB_SYMBOL}`}
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-semibold">
                         <span className={diffStyle(row.current, row.prev)}>
-                          {diffAbs(row.current, row.prev)} {row.isPercent ? '%' : '₽'}
+                          {diffAbs(row.current, row.prev)} {row.isPercent ? '%' : RUB_SYMBOL}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-right font-bold">
@@ -499,7 +501,7 @@ export default function FinanceReportTab({ links, payments }: Props) {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-green-50 mb-2">
               <i className="ri-coins-line text-green-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{currentStats.clientRevenue.toLocaleString('ru')} ₽</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(currentStats.clientRevenue, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">Оплачено клиентами</div>
           </div>
 
@@ -507,7 +509,7 @@ export default function FinanceReportTab({ links, payments }: Props) {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 mb-2">
               <i className="ri-hand-coin-line text-red-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{currentStats.executorPayouts.toLocaleString('ru')} ₽</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(currentStats.executorPayouts, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">Выплачено исполнителям</div>
           </div>
 
@@ -515,7 +517,7 @@ export default function FinanceReportTab({ links, payments }: Props) {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-blue-50 mb-2">
               <i className="ri-bar-chart-line text-blue-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{currentStats.profit.toLocaleString('ru')} ₽</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(currentStats.profit, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">Прибыль</div>
           </div>
 
@@ -523,7 +525,7 @@ export default function FinanceReportTab({ links, payments }: Props) {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-emerald-50 mb-2">
               <i className="ri-file-list-3-line text-emerald-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{currentStats.clientPaidLinksSum.toLocaleString('ru')} ₽</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(currentStats.clientPaidLinksSum, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">Оплата по сданным ссылкам</div>
           </div>
 
@@ -531,7 +533,7 @@ export default function FinanceReportTab({ links, payments }: Props) {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-amber-50 mb-2">
               <i className="ri-user-received-line text-amber-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{currentStats.executorPaidLinksSum.toLocaleString('ru')} ₽</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(currentStats.executorPaidLinksSum, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">Выплаты по сданным ссылкам</div>
           </div>
 
@@ -578,17 +580,17 @@ export default function FinanceReportTab({ links, payments }: Props) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">{link.status}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{link.clientCost.toLocaleString('ru')} ₽</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{formatMoney(link.clientCost, payments.find((p) => p.linkId === link.id)?.currency || 'RUB')}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${link.clientPaid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                         <i className={link.clientPaid ? 'ri-check-line' : 'ri-close-line'} />
-                        {link.clientPaid ? `Оплачено ${link.clientCost.toLocaleString('ru')} ₽` : 'Не оплачено'}
+                        {link.clientPaid ? `Оплачено ${formatMoney(link.clientCost, payments.find((p) => p.linkId === link.id)?.currency || 'RUB')}` : 'Не оплачено'}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold ${link.executorPaid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                         <i className={link.executorPaid ? 'ri-check-line' : 'ri-close-line'} />
-                        {link.executorPaid ? `Выплачено ${link.executorCost.toLocaleString('ru')} ₽` : 'Не выплачено'}
+                        {link.executorPaid ? `Выплачено ${formatMoney(link.executorCost, payments.find((p) => p.linkId === link.id)?.currency || 'RUB')}` : 'Не выплачено'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">{link.endDate || '—'}</td>

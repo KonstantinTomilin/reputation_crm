@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useCRM } from '@/context/CRMContext';
+import { defaultProjectDeadline } from '@/lib/dateUtils';
 import type { CRMLink, WorkType, SearchEngineFlags } from '@/mocks/crm';
 
 interface Props {
@@ -25,6 +26,7 @@ export default function BulkAddLinksModal({ onClose, onAdded }: Props) {
 
     const pid = Number(projectId);
     const cid = Number(clientId);
+    const projectDeadline = crm.projects.find((p) => p.id === pid)?.deadline || defaultProjectDeadline();
 
     urls.forEach((url) => {
       crm.addLink({
@@ -37,7 +39,7 @@ export default function BulkAddLinksModal({ onClose, onAdded }: Props) {
         addedDate: new Date().toISOString().split('T')[0],
         startDate: null,
         endDate: null,
-        deadline: null,
+        deadline: projectDeadline,
         quarantineDays: 0,
         quarantineEndDate: null,
         executorId: null,

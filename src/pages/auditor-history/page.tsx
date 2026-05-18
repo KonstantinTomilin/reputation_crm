@@ -2,15 +2,17 @@ import { useState } from 'react';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
 import type { CRMLink } from '@/mocks/crm';
 
 export default function AuditorHistoryPage() {
   const crm = useCRM();
+  const scope = useRoleScope();
   const [searchQuery, setSearchQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const historyLinks = crm.links.filter((l) => l.auditorId !== null && l.auditorId !== undefined);
+  const historyLinks = scope.links.filter((l) => l.auditorId !== null && l.auditorId !== undefined);
 
   const filtered = historyLinks.filter((l) => {
     const matchSearch =
@@ -56,7 +58,7 @@ export default function AuditorHistoryPage() {
                 className="appearance-none bg-white border border-slate-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:border-slate-400 cursor-pointer"
               >
                 <option value="all">Все проекты</option>
-                {crm.projects.map((p) => (
+                {scope.projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>

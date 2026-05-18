@@ -24,10 +24,14 @@ import {
   mockPayments,
   mockUsers,
 } from '@/mocks/crm';
-import type { CRMUser, CRMClient, CRMLink, LinkStatus, CRMProject, ProjectStatus } from '@/mocks/crm';
+import type { CRMUser, CRMClient, CRMLink, LinkStatus, CRMProject, ProjectStatus, ClientPaymentStatus, ExecutorPaymentStatus } from '@/mocks/crm';
+import { defaultProjectDeadline } from '@/lib/dateUtils';
+import { formatGroupedAmounts, formatMoney, getCurrencySymbol, groupAmountsByCurrency } from '@/lib/currency';
+import { COMPLETED_WORK_STATUSES, setClientPaymentStatus, setExecutorPaymentStatus } from '@/lib/linkFinance';
+import { IS_PRODUCTION_UI } from '@/context/CRMContext';
 
 const validTabs = [
-  'overview', 'users', 'projects', 'links', 'audits',
+  'overview', 'users', 'projects', 'links', 'audits', 'auditors',
   'executors', 'finance', 'reports', 'settings', 'kanban', 'overdue',
 ] as const;
 
@@ -81,7 +85,7 @@ export default function ManagementDashboardPage() {
 
   const [searchUsers, setSearchUsers] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [currencyFilter, setCurrencyFilter] = useState<'all' | 'RUB' | 'USD'>('all');
+  const [currencyFilter, setCurrencyFilter] = useState<'all' | 'RUB' | 'USD' | 'EUR' | 'AED'>('all');
   const [executorReportId, setExecutorReportId] = useState<number | null>(null);
   const [executorPaymentId, setExecutorPaymentId] = useState<number | null>(null);
   const [projectDetailId, setProjectDetailId] = useState<number | null>(null);
@@ -170,6 +174,23 @@ export default function ManagementDashboardPage() {
     .filter((p) => p.type === 'выплата исполнителю' && p.status === 'оплачен' && p.currency === 'USD')
     .reduce((sum, p) => sum + p.amount, 0);
   const totalDebt = clientsList.reduce((sum, c) => sum + c.totalDebt, 0);
+  const revenueByCurrency = groupAmountsByCurrency(
+    paymentsList
+      .filter((p) => p.type === 'оплата клиента' && p.status === 'оплачен')
+      .map((p) => ({ amount: p.amount, currency: p.currency }))
+  );
+  const payoutsByCurrency = groupAmountsByCurrency(
+    paymentsList
+      .filter((p) => p.type === 'выплата исполнителю' && p.status === 'оплачен')
+      .map((p) => ({ amount: p.amount, currency: p.currency }))
+  );
+  const profitByCurrency = Object.keys({ ...revenueByCurrency, ...payoutsByCurrency }).reduce<Record<string, number>>((acc, cur) => {
+    acc[cur] = (revenueByCurrency[cur] ?? 0) - (payoutsByCurrency[cur] ?? 0);
+    return acc;
+  }, {});
+  const debtByCurrency = groupAmountsByCurrency(
+    clientsList.map((c) => ({ amount: c.totalDebt, currency: c.currency }))
+  );
 
   // Overdue
   const overdueLinks = useMemo(() => {
@@ -178,7 +199,7 @@ export default function ManagementDashboardPage() {
       (l) =>
         l.deadline &&
         l.deadline < today &&
-        !['удалено', 'принято', 'деиндексировано google', 'деиндексировано yandex', 'деиндексировано bing'].includes(l.status)
+        !COMPLETED_WORK_STATUSES.includes(l.status)
     );
   }, [linksList]);
 
@@ -256,6 +277,7 @@ export default function ManagementDashboardPage() {
         const password = (form as any).password || 'password';
         crm.addAuthUser({
           email: form.email,
+          login: form.login,
           password,
           role: form.role,
           name: form.fullName,
@@ -269,12 +291,12 @@ export default function ManagementDashboardPage() {
     setConfirmModal({
       open: true,
       title: 'Удалить пользователя',
-      message: 'Это действие нельзя отменить. Пользователь будет полностью удалён из системы.',
+      message: 'Пользователь будет деактивирован (soft-delete) и вход будет отключён.',
       onConfirm: () => {
-        crm.setUsers((prev) => prev.filter((u) => u.id !== id));
+        crm.softDeleteUser(id);
         setConfirmModal(null);
       },
-      confirmText: 'Удалить',
+      confirmText: 'Деактивировать',
       danger: true,
     });
   };
@@ -293,18 +315,15 @@ export default function ManagementDashboardPage() {
   };
 
   const handleUpdateLink = (updated: CRMLink) => {
-    const deliveredStatuses = ['сдано', 'сдано клиенту', 'принято', 'не принято', 'отправлено клиенту'];
-    // Auto-change status to 'сдано клиенту' when client pays
-    if (updated.clientPaid && !deliveredStatuses.includes(updated.status)) {
-      crm.updateLink({ ...updated, status: 'сдано клиенту' });
-      return;
-    }
-    // Auto-revert status when client payment is removed
-    if (!updated.clientPaid && deliveredStatuses.includes(updated.status)) {
-      crm.updateLink({ ...updated, status: 'готово' });
-      return;
-    }
     crm.updateLink(updated);
+  };
+
+  const handleClientPaymentChange = (link: CRMLink, status: ClientPaymentStatus) => {
+    crm.updateLink(setClientPaymentStatus(link, status));
+  };
+
+  const handleExecutorPaymentChange = (link: CRMLink, status: ExecutorPaymentStatus) => {
+    crm.updateLink(setExecutorPaymentStatus(link, status));
   };
 
   const handleSaveProject = (data: {
@@ -318,6 +337,7 @@ export default function ManagementDashboardPage() {
   }) => {
     const newProjectId = Math.max(...projectsList.map((p) => p.id), 0) + 1;
     const today = new Date().toISOString().split('T')[0];
+    const projectDeadline = data.deadline || defaultProjectDeadline(today);
     const assignedExecutor = data.executorId
       ? usersList.find((u) => u.id === data.executorId)
       : null;
@@ -337,7 +357,7 @@ export default function ManagementDashboardPage() {
         successRate: 0,
         status: 'новый',
         startDate: today,
-        deadline: data.deadline,
+        deadline: projectDeadline,
         manager: assignedExecutor?.fullName || '—',
         currency: data.currency,
         source: data.source,
@@ -356,7 +376,7 @@ export default function ManagementDashboardPage() {
       addedDate: today,
       startDate: null,
       endDate: null,
-      deadline: null,
+      deadline: projectDeadline,
       quarantineDays: 0,
       quarantineEndDate: null,
       executorId: data.executorId,
@@ -366,20 +386,63 @@ export default function ManagementDashboardPage() {
       clientPaid: false,
       clientPaidDate: null,
       clientPaidAmount: null,
+      clientPaymentStatus: 'unpaid',
       executorPaid: false,
       executorPaidDate: null,
       executorPaidAmount: null,
+      executorPaymentStatus: 'not_accrued',
       comments: [],
       proofsFolder: null,
       proofFiles: [],
     }));
 
     crm.setLinks((prev) => [...prev, ...newLinks]);
+
+    if (data.executorId) {
+      crm.pushNotification({
+        userId: data.executorId,
+        role: 'executor',
+        title: 'Новый проект',
+        message: `Вам назначен проект «${data.name}» (${newLinks.length} ссылок)`,
+        link: '/executor',
+        type: 'info',
+      });
+    }
+
     setProjectModal({ open: false });
   };
 
   const handleSaveProjectEdit = (updated: CRMProject) => {
     crm.updateProject(updated);
+  };
+
+  const exportProjectPdf = async (projectId: number) => {
+    const project = projectsList.find((p) => p.id === projectId);
+    if (!project) return;
+    const projectLinks = linksList.filter((l) => l.projectId === projectId);
+    const client = clientsList.find((c) => c.id === project.clientId);
+    const countBy = (statuses: string[]) => projectLinks.filter((l) => statuses.includes(l.status)).length;
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <div style="font-family:Arial;padding:20px">
+        <h1 style="color:#1e3a8a">Отчёт по проекту: ${project.name}</h1>
+        <p>Клиент: ${client?.companyName ?? '—'} · Валюта: ${project.currency} · Дедлайн: ${project.deadline ?? '—'}</p>
+        <p>Удалено: ${countBy(['удалено'])} · Деиндексировано: ${countBy(['деиндексировано google','деиндексировано yandex','деиндексировано bing','деиндексировано yahoo'])} · Частично: ${countBy(['частично деиндексировано'])} · Карантин: ${countBy(['в карантине'])} · В работе: ${countBy(['в работе','повторно в работе'])}</p>
+        <p>Оплачено: ${projectLinks.filter((l) => l.clientPaymentStatus === 'paid' || l.clientPaid).length} · Не оплачено: ${projectLinks.filter((l) => (l.clientPaymentStatus ?? 'unpaid') === 'unpaid').length}</p>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:12px">
+          <thead><tr style="background:#1e3a8a;color:#fff"><th style="padding:6px">URL</th><th>Тип</th><th>Статус</th><th>Стоимость</th><th>Оплата</th></tr></thead>
+          <tbody>
+            ${projectLinks.map((l) => `<tr>
+              <td style="border:1px solid #ddd;padding:6px">${l.url}</td>
+              <td style="border:1px solid #ddd;padding:6px">${l.type}</td>
+              <td style="border:1px solid #ddd;padding:6px">${l.status}</td>
+              <td style="border:1px solid #ddd;padding:6px">${formatMoney(l.clientCost, project.currency)}</td>
+              <td style="border:1px solid #ddd;padding:6px">${l.clientPaymentStatus ?? (l.clientPaid ? 'paid' : 'unpaid')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+    await html2pdf().set({ margin: 10, filename: `project-${project.id}-${Date.now()}.pdf`, html2canvas: { scale: 2 } }).from(container).save();
   };
 
   const generateFullReport = async () => {
@@ -422,8 +485,8 @@ export default function ManagementDashboardPage() {
             <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">В работе</th>
             <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Удалено</th>
             <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Успех %</th>
-            <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Выручка ₽</th>
-            <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Выплаты ₽</th>
+            <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Выручка</th>
+            <th style="padding: 8px; border: 1px solid #ddd; text-align: center;">Выплаты</th>
           </tr>
         </thead>
         <tbody>
@@ -444,8 +507,8 @@ export default function ManagementDashboardPage() {
           <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${projectLinks.filter((l) => l.status === 'в работе').length}</td>
           <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${projectLinks.filter((l) => ['удалено', 'принято', 'деиндексировано google', 'деиндексировано yandex'].includes(l.status)).length}</td>
           <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${projectLinks.length > 0 ? Math.round((projectLinks.filter((l) => ['удалено', 'принято', 'деиндексировано google'].includes(l.status)).length / projectLinks.length) * 100) : 0}%</td>
-          <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${revenue.toLocaleString('ru')} ₽</td>
-          <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${payouts.toLocaleString('ru')} ₽</td>
+          <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${formatMoney(revenue, project.currency)}</td>
+          <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${formatMoney(payouts, project.currency)}</td>
         </tr>
       `;
     });
@@ -485,7 +548,7 @@ export default function ManagementDashboardPage() {
           <td style="padding: 6px 8px; border: 1px solid #ddd;">${project?.name || '—'}</td>
           <td style="padding: 6px 8px; border: 1px solid #ddd;">${link.type}</td>
           <td style="padding: 6px 8px; border: 1px solid #ddd;">${link.status}</td>
-          <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${link.clientCost.toLocaleString('ru')} ₽</td>
+          <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${formatMoney(link.clientCost, project?.currency)}</td>
           <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${link.clientPaid ? 'Да' : 'Нет'}</td>
           <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${link.executorPaid ? 'Да' : 'Нет'}</td>
           <td style="padding: 6px 8px; border: 1px solid #ddd;">${executor?.fullName || '—'}</td>
@@ -562,10 +625,10 @@ export default function ManagementDashboardPage() {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-emerald-50">
               <i className="ri-money-cny-circle-line text-emerald-600 text-lg" />
             </div>
-            <div className="text-xs font-semibold text-gray-500 leading-tight">Выручка ₽ ({periodLabels[period]})</div>
+            <div className="text-xs font-semibold text-gray-500 leading-tight">Выручка ({periodLabels[period]})</div>
           </div>
           <div className="text-xl font-bold text-gray-800">
-            {`${periodFilteredPayments.filter((p) => p.type === 'оплата клиента' && p.status === 'оплачен' && p.currency === 'RUB').reduce((sum, p) => sum + p.amount, 0).toLocaleString('ru')} ₽`}
+            {formatMoney(periodFilteredPayments.filter((p) => p.type === 'оплата клиента' && p.status === 'оплачен' && p.currency === 'RUB').reduce((sum, p) => sum + p.amount, 0), 'RUB')}
           </div>
           <div className="text-xs text-gray-500 mt-0.5">
             {`${periodFilteredPayments.filter((p) => p.type === 'оплата клиента' && p.status === 'оплачен' && p.currency === 'USD').reduce((sum, p) => sum + p.amount, 0).toLocaleString('ru')} $`}
@@ -579,7 +642,7 @@ export default function ManagementDashboardPage() {
             </div>
             <div className="text-xs font-semibold text-gray-500 leading-tight">Задолженность</div>
           </div>
-          <div className="text-xl font-bold text-gray-800">{`${totalDebt.toLocaleString('ru')} ₽`}</div>
+          <div className="text-xl font-bold text-gray-800">{formatMoney(totalDebt, 'RUB')}</div>
           <div className="text-xs text-gray-500 mt-0.5">по клиентам</div>
         </div>
       </div>
@@ -989,7 +1052,7 @@ export default function ManagementDashboardPage() {
       (l) =>
         l.deadline &&
         l.deadline < today &&
-        !['удалено', 'принято', 'деиндексировано google', 'деиндексировано yandex', 'деиндексировано bing'].includes(l.status)
+        !COMPLETED_WORK_STATUSES.includes(l.status)
     );
     return base.filter((l) => {
       const matchSearch = !overdueFilters.search || l.url.toLowerCase().includes(overdueFilters.search.toLowerCase());
@@ -1169,33 +1232,29 @@ export default function ManagementDashboardPage() {
                       <option value="в карантине">В карантине</option>
                     </select>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{link.clientCost.toLocaleString('ru')} ₽</td>
+                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
+                    {formatMoney(link.clientCost, projectsList.find((p) => p.id === link.projectId)?.currency)}
+                  </td>
                   <td className="px-4 py-3">
                     <select
-                      value={link.clientPaid ? 'yes' : 'no'}
-                      onChange={(e) => handleUpdateLink({ ...link, clientPaid: e.target.value === 'yes' })}
-                      className={`text-xs border rounded-lg px-2 py-1 cursor-pointer focus:outline-none font-semibold ${
-                        link.clientPaid
-                          ? 'bg-green-50 border-green-300 text-green-700 focus:border-green-500'
-                          : 'bg-red-50 border-red-300 text-red-700 focus:border-red-500'
-                      }`}
+                      value={link.clientPaymentStatus ?? (link.clientPaid ? 'paid' : 'unpaid')}
+                      onChange={(e) => handleClientPaymentChange(link, e.target.value as ClientPaymentStatus)}
+                      className="text-xs border rounded-lg px-2 py-1 cursor-pointer focus:outline-none font-semibold bg-white"
                     >
-                      <option value="yes">Оплачено</option>
-                      <option value="no">Не оплачено</option>
+                      <option value="unpaid">Не оплачено</option>
+                      <option value="partially_paid">Частично</option>
+                      <option value="paid">Оплачено</option>
                     </select>
                   </td>
                   <td className="px-4 py-3">
                     <select
-                      value={link.executorPaid ? 'yes' : 'no'}
-                      onChange={(e) => handleUpdateLink({ ...link, executorPaid: e.target.value === 'yes' })}
-                      className={`text-xs border rounded-lg px-2 py-1 cursor-pointer focus:outline-none font-semibold ${
-                        link.executorPaid
-                          ? 'bg-green-50 border-green-300 text-green-700 focus:border-green-500'
-                          : 'bg-red-50 border-red-300 text-red-700 focus:border-red-500'
-                      }`}
+                      value={link.executorPaymentStatus ?? (link.executorPaid ? 'paid_to_executor' : 'not_accrued')}
+                      onChange={(e) => handleExecutorPaymentChange(link, e.target.value as ExecutorPaymentStatus)}
+                      className="text-xs border rounded-lg px-2 py-1 cursor-pointer focus:outline-none font-semibold bg-white"
                     >
-                      <option value="yes">Выплачено</option>
-                      <option value="no">Не выплачено</option>
+                      <option value="not_accrued">Не начислено</option>
+                      <option value="accrued">Начислено</option>
+                      <option value="paid_to_executor">Выплачено</option>
                     </select>
                   </td>
                   <td className="px-4 py-3">
@@ -1293,8 +1352,8 @@ export default function ManagementDashboardPage() {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-orange-50 mb-2">
               <i className="ri-hand-coin-line text-orange-600 text-lg" />
             </div>
-            <div className="text-xl font-bold text-gray-800">{`${rubPayouts.toLocaleString('ru')} ₽`}</div>
-            <div className="text-xs text-gray-500 mt-0.5">Выплат ₽</div>
+            <div className="text-xl font-bold text-gray-800">{formatMoney(rubPayouts, 'RUB')}</div>
+            <div className="text-xs text-gray-500 mt-0.5">Выплат (RUB)</div>
           </div>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -1329,9 +1388,15 @@ export default function ManagementDashboardPage() {
                       <td className="px-4 py-3"><StatusBadge status={exec.status} type="payment" /></td>
                       <td className="px-4 py-3 text-sm text-gray-700 text-center">{doneLinks.length}</td>
                       <td className="px-4 py-3 text-sm text-blue-600 font-semibold text-center">{inWorkLinks.length}</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-700">{totalEarned.toLocaleString('ru')} ₽</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-green-600">{paid.toLocaleString('ru')} ₽</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-orange-600">{(totalEarned - paid).toLocaleString('ru')} ₽</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-700">
+                        {formatGroupedAmounts(groupAmountsByCurrency(doneLinks.map((l) => ({ amount: l.executorCost, currency: projectsList.find((p) => p.id === l.projectId)?.currency }))))}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-green-600">
+                        {formatGroupedAmounts(groupAmountsByCurrency(doneLinks.filter((l) => l.executorPaid).map((l) => ({ amount: l.executorCost, currency: projectsList.find((p) => p.id === l.projectId)?.currency }))))}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-semibold text-orange-600">
+                        {formatGroupedAmounts(groupAmountsByCurrency(doneLinks.filter((l) => !l.executorPaid).map((l) => ({ amount: l.executorCost, currency: projectsList.find((p) => p.id === l.projectId)?.currency }))))}
+                      </td>
                       <td className="px-4 py-3">
                         <button
                           onClick={() => setExecutorReportId(exec.id)}
@@ -1570,7 +1635,7 @@ export default function ManagementDashboardPage() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
             <span className="text-sm font-medium text-gray-600">Валюта:</span>
             <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-1">
-              {(['all', 'RUB', 'USD'] as const).map((c) => (
+              {(['all', 'RUB', 'USD', 'EUR', 'AED'] as const).map((c) => (
                 <button
                   key={c}
                   onClick={() => setCurrencyFilter(c)}
@@ -1578,26 +1643,23 @@ export default function ManagementDashboardPage() {
                     currencyFilter === c ? 'bg-blue-900 text-white' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  {c === 'all' ? 'Все' : c === 'RUB' ? '₽ Рубли' : '$ Доллары'}
+                  {c === 'all' ? 'Все' : `${getCurrencySymbol(c)} ${c}`}
                 </button>
               ))}
             </div>
             <span className="text-xs text-gray-400 ml-auto">{filteredPayments.length} записей</span>
           </div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <KPICard label="Выручка ₽" value={`${rubRevenue.toLocaleString('ru')} ₽`} icon="ri-coins-line" accent="text-green-600" />
-            <KPICard label="Выручка $" value={`${usdRevenue.toLocaleString('ru')} $`} icon="ri-coins-line" accent="text-blue-600" />
-            <KPICard label="Выплаты ₽" value={`${rubPayouts.toLocaleString('ru')} ₽`} icon="ri-hand-coin-line" accent="text-orange-600" />
-            <KPICard label="Выплаты $" value={`${usdPayouts.toLocaleString('ru')} $`} icon="ri-hand-coin-line" accent="text-blue-900" />
-            <KPICard label="Прибыль ₽" value={`${(rubRevenue - rubPayouts).toLocaleString('ru')} ₽`} icon="ri-bar-chart-line" accent="text-emerald-600" />
-            <KPICard label="Прибыль $" value={`${(usdRevenue - usdPayouts).toLocaleString('ru')} $`} icon="ri-bar-chart-line" accent="text-cyan-600" />
-            <KPICard label="Задолженность" value={`${totalDebt.toLocaleString('ru')} ₽`} icon="ri-alert-line" accent="text-red-600" />
+            <KPICard label="Выручка (все валюты)" value={formatGroupedAmounts(revenueByCurrency)} icon="ri-coins-line" accent="text-green-600" />
+            <KPICard label="Выплаты (все валюты)" value={formatGroupedAmounts(payoutsByCurrency)} icon="ri-hand-coin-line" accent="text-blue-900" />
+            <KPICard label="Прибыль (все валюты)" value={formatGroupedAmounts(profitByCurrency)} icon="ri-bar-chart-line" accent="text-cyan-600" />
+            <KPICard label="Задолженность" value={formatGroupedAmounts(debtByCurrency)} icon="ri-alert-line" accent="text-red-600" />
             <KPICard label="Просрочено платежей" value={paymentsList.filter((p) => p.status === 'просрочен').length} icon="ri-alarm-warning-line" accent="text-red-600" />
           </div>
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-base font-bold text-gray-800">История платежей</h2>
-              <span className="text-xs text-gray-400">{currencyFilter === 'all' ? 'Все валюты' : currencyFilter === 'RUB' ? 'Только ₽' : 'Только $'}</span>
+              <span className="text-xs text-gray-400">{currencyFilter === 'all' ? 'Все валюты' : `Только ${currencyFilter}`}</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[800px]">
@@ -1622,7 +1684,7 @@ export default function ManagementDashboardPage() {
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${payment.type === 'оплата клиента' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>{payment.type}</span>
                         </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-gray-800">{payment.amount.toLocaleString('ru')} {payment.currency === 'RUB' ? '₽' : '$'}</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-800">{formatMoney(payment.amount, payment.currency)}</td>
                         <td className="px-4 py-3 text-sm text-gray-600">{payment.currency}</td>
                         <td className="px-4 py-3"><StatusBadge status={payment.status} type="payment" /></td>
                         <td className="px-4 py-3 text-sm text-gray-600">{payment.description}</td>
@@ -1773,7 +1835,7 @@ export default function ManagementDashboardPage() {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-white mb-2">
               <i className="ri-coins-line text-green-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{`${periodRevenue.toLocaleString('ru')} ₽`}</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(periodRevenue, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">{`Выручка за ${periodLabels[period].toLowerCase()}`}</div>
           </div>
 
@@ -1781,7 +1843,7 @@ export default function ManagementDashboardPage() {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-white mb-2">
               <i className="ri-hand-coin-line text-orange-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{`${periodPayouts.toLocaleString('ru')} ₽`}</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(periodPayouts, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">{`Выплаты за ${periodLabels[period].toLowerCase()}`}</div>
           </div>
 
@@ -1789,7 +1851,7 @@ export default function ManagementDashboardPage() {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-white mb-2">
               <i className="ri-bar-chart-line text-blue-600 text-lg" />
             </div>
-            <div className="text-2xl font-bold text-gray-800">{`${(periodRevenue - periodPayouts).toLocaleString('ru')} ₽`}</div>
+            <div className="text-2xl font-bold text-gray-800">{formatMoney(periodRevenue - periodPayouts, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">{`Прибыль за ${periodLabels[period].toLowerCase()}`}</div>
           </div>
 
@@ -1809,7 +1871,7 @@ export default function ManagementDashboardPage() {
             <table className="w-full min-w-[900px]">
               <thead>
                 <tr className="border-b border-slate-200">
-                  {['Проект', 'Клиент', 'Ссылок', 'В работе', 'Удалено', 'Успех %', 'Выручка ₽', 'Выплаты ₽', 'Прибыль ₽'].map((h) => (
+                  {['Проект', 'Клиент', 'Ссылок', 'В работе', 'Удалено', 'Успех %', 'Выручка', 'Выплаты', 'Прибыль'].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -1836,9 +1898,9 @@ export default function ManagementDashboardPage() {
                           <span className="text-xs font-bold text-gray-700">{successRate}%</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{revenue.toLocaleString('ru')} ₽</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{payouts.toLocaleString('ru')} ₽</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{(revenue - payouts).toLocaleString('ru')} ₽</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{formatMoney(revenue, project.currency)}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{formatMoney(payouts, project.currency)}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{formatMoney(revenue - payouts, project.currency)}</td>
                     </tr>
                   );
                 })}
@@ -1870,9 +1932,15 @@ export default function ManagementDashboardPage() {
                       <tr key={executor.id} className="border-b border-slate-50 hover:bg-slate-50/30">
                         <td className="px-4 py-3 text-sm font-semibold text-gray-800">{executor.fullName}</td>
                         <td className="px-4 py-3 text-sm text-gray-700 text-center">{execLinks.length}</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{totalCost.toLocaleString('ru')} ₽</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-green-600 whitespace-nowrap">{paid.toLocaleString('ru')} ₽</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-orange-600 whitespace-nowrap">{(totalCost - paid).toLocaleString('ru')} ₽</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">
+                          {formatGroupedAmounts(groupAmountsByCurrency(execLinks.map((l) => ({ amount: l.executorCost, currency: projectsList.find((p) => p.id === l.projectId)?.currency }))))}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-green-600 whitespace-nowrap">
+                          {formatGroupedAmounts(groupAmountsByCurrency(execLinks.filter((l) => l.executorPaid).map((l) => ({ amount: l.executorCost, currency: projectsList.find((p) => p.id === l.projectId)?.currency }))))}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-orange-600 whitespace-nowrap">
+                          {formatGroupedAmounts(groupAmountsByCurrency(execLinks.filter((l) => !l.executorPaid).map((l) => ({ amount: l.executorCost, currency: projectsList.find((p) => p.id === l.projectId)?.currency }))))}
+                        </td>
                         <td className="px-4 py-3">
                           <button
                             onClick={() => setExecutorReportId(executor.id)}
@@ -2076,6 +2144,7 @@ export default function ManagementDashboardPage() {
               <div className="text-xs text-gray-500">Проверяет связи ссылок, оплат и ролей</div>
             </div>
           </button>
+          {!IS_PRODUCTION_UI && (
           <button
             onClick={crm.resetTestEnvironment}
             className="flex items-center gap-3 p-4 bg-red-50 rounded-xl hover:bg-red-100 transition-colors cursor-pointer text-left"
@@ -2088,6 +2157,7 @@ export default function ManagementDashboardPage() {
               <div className="text-xs text-red-500">Удаляет все проекты, ссылки, аудиты и платежи</div>
             </div>
           </button>
+          )}
         </div>
       </div>
 
@@ -2098,7 +2168,12 @@ export default function ManagementDashboardPage() {
             <p className="text-xs text-gray-500 mt-0.5">Скрывать реальные имена исполнителей во внутренних отчётах</p>
           </div>
           <label className="relative inline-flex items-center cursor-pointer">
-            <input type="checkbox" className="sr-only peer" defaultChecked />
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={crm.settings.anonymizeExecutors}
+              onChange={(e) => crm.setSettings((s) => ({ ...s, anonymizeExecutors: e.target.checked }))}
+            />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-900" />
           </label>
         </div>
@@ -2122,11 +2197,31 @@ export default function ManagementDashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
             <div>
-              <div className="text-sm font-semibold text-gray-800">Уведомления по email</div>
-              <div className="text-xs text-gray-500">Отправлять уведомления при изменении статуса</div>
+              <div className="text-sm font-semibold text-gray-800">Уведомления включены</div>
+              <div className="text-xs text-gray-500">Внутренние уведомления в CRM</div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" defaultChecked />
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={crm.settings.notificationsEnabled}
+                onChange={(e) => crm.setSettings((s) => ({ ...s, notificationsEnabled: e.target.checked }))}
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-900" />
+            </label>
+          </div>
+          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+            <div>
+              <div className="text-sm font-semibold text-gray-800">Звуковые уведомления</div>
+              <div className="text-xs text-gray-500">Короткий сигнал при новом событии</div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={crm.settings.soundNotificationsEnabled}
+                onChange={(e) => crm.setSettings((s) => ({ ...s, soundNotificationsEnabled: e.target.checked }))}
+              />
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-900" />
             </label>
           </div>
@@ -2136,7 +2231,12 @@ export default function ManagementDashboardPage() {
               <div className="text-xs text-gray-500">Автоматически отправлять на аудит</div>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" />
+              <input
+                type="checkbox"
+                className="sr-only peer"
+                checked={crm.settings.autoAuditNewLinks}
+                onChange={(e) => crm.setSettings((s) => ({ ...s, autoAuditNewLinks: e.target.checked }))}
+              />
               <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-900" />
             </label>
           </div>
@@ -2191,7 +2291,7 @@ export default function ManagementDashboardPage() {
             <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${audit.removalProbability}%</td>
             <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${audit.deindexProbability}%</td>
             <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center;">${audit.removalDaysEstimate || audit.deindexDaysEstimate} дн</td>
-            <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${totalCost.toLocaleString('ru')} ₽</td>
+            <td style="padding: 6px 8px; border: 1px solid #ddd; text-align: center; white-space: nowrap;">${formatMoney(totalCost, project?.currency)}</td>
             <td style="padding: 6px 8px; border: 1px solid #ddd;">${audit.riskLevel}</td>
           </tr>
         `;
@@ -2355,6 +2455,7 @@ export default function ManagementDashboardPage() {
             project={project}
             onClose={() => setProjectDetailId(null)}
             onSave={handleSaveProjectEdit}
+            onExportPdf={exportProjectPdf}
           />
         );
       })()}

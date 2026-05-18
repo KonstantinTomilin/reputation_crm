@@ -3,6 +3,8 @@ import html2pdf from 'html2pdf.js';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
+import { formatGroupedAmounts, formatMoney, groupAmountsByCurrency } from '@/lib/currency';
 import type { LinkStatus } from '@/mocks/crm';
 
 type ReportType = 'summary' | 'links' | 'project';
@@ -34,8 +36,9 @@ export default function ClientReportsPage() {
   const [reportGenerated, setReportGenerated] = useState(false);
 
   const crm = useCRM();
-  const mockLinks = crm.links;
-  const mockProjects = crm.projects;
+  const scope = useRoleScope();
+  const mockLinks = scope.links;
+  const mockProjects = scope.projects;
 
   const filteredLinks = useMemo(() => {
     return mockLinks.filter((l) => {
@@ -89,6 +92,16 @@ export default function ClientReportsPage() {
     const paidAmount = filteredLinks.filter((l) => l.clientPaid).reduce((s, l) => s + (l.clientPaidAmount || l.clientCost), 0);
     return { total, removed, deindexed, inWork, returned, overdue, quarantine, totalCost, paidAmount };
   }, [filteredLinks]);
+  const summaryDebtByCurrency = useMemo(
+    () =>
+      groupAmountsByCurrency(
+        filteredLinks.map((l) => ({
+          amount: l.clientCost - (l.clientPaid ? (l.clientPaidAmount || l.clientCost) : 0),
+          currency: mockProjects.find((p) => p.id === l.projectId)?.currency,
+        }))
+      ),
+    [filteredLinks, mockProjects]
+  );
 
   const removedLinks = useMemo(() => filteredLinks.filter((l) => l.status === 'удалено'), [filteredLinks]);
   const deindexedLinks = useMemo(() => filteredLinks.filter((l) => l.status.startsWith('деиндексировано')), [filteredLinks]);
@@ -113,7 +126,10 @@ export default function ClientReportsPage() {
 
     const makeLinkRows = (links: typeof mockLinks) => links.map((l, i) => {
       const payStatus = l.clientPaid ? 'Оплачено' : 'Не оплачено';
-      const payAmount = l.clientPaid ? (l.clientPaidAmount || l.clientCost).toLocaleString('ru') + ' ₽' : l.clientCost.toLocaleString('ru') + ' ₽';
+      const projectCur = mockProjects.find((p) => p.id === l.projectId)?.currency;
+      const payAmount = l.clientPaid
+        ? formatMoney(l.clientPaidAmount || l.clientCost, projectCur)
+        : formatMoney(l.clientCost, projectCur);
       const project = mockProjects.find(p => p.id === l.projectId)?.name || '—';
       return `
         <tr style="background:${i % 2 === 0 ? WHITE : '#f8fafc'}">
@@ -169,8 +185,8 @@ export default function ClientReportsPage() {
         <td style="border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;text-align:center;color:#374151;font-weight:600;font-family:Arial,sans-serif">${s.inWork}</td>
         <td style="border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;text-align:center;color:#dc2626;font-weight:700;font-family:Arial,sans-serif">${s.returned}</td>
         <td style="border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;text-align:center;color:#dc2626;font-weight:700;font-family:Arial,sans-serif">${s.overdue}</td>
-        <td style="border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;text-align:right;color:#dc2626;font-weight:700;font-family:Arial,sans-serif">${(s.totalCost - s.paidAmount).toLocaleString('ru')} ₽</td>
-        <td style="border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;text-align:right;color:#059669;font-weight:700;font-family:Arial,sans-serif">${s.paidAmount.toLocaleString('ru')} ₽</td>
+        <td style="border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;text-align:right;color:#dc2626;font-weight:700;font-family:Arial,sans-serif">${(s.totalCost - s.paidAmount).toLocaleString('ru')}</td>
+        <td style="border-bottom:1px solid #e5e7eb;padding:7px 10px;font-size:12px;text-align:right;color:#059669;font-weight:700;font-family:Arial,sans-serif">${s.paidAmount.toLocaleString('ru')}</td>
       </tr>
     `).join('');
 
@@ -401,7 +417,7 @@ export default function ClientReportsPage() {
               className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100 bg-white cursor-pointer"
             >
               <option value="all">Все проекты</option>
-              {mockProjects.map((p) => (
+                {mockProjects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
@@ -447,7 +463,7 @@ export default function ClientReportsPage() {
                 { label: 'Вернулось', value: summaryKPI.returned, icon: 'ri-arrow-go-back-line', color: 'text-rose-600', bg: 'bg-rose-50', border: 'border-rose-100' },
                 { label: 'Просрочено', value: summaryKPI.overdue, icon: 'ri-alarm-warning-line', color: 'text-red-500', bg: 'bg-red-50', border: 'border-red-100' },
                 { label: 'В карантине', value: summaryKPI.quarantine, icon: 'ri-shield-cross-line', color: 'text-yellow-600', bg: 'bg-yellow-50', border: 'border-yellow-100' },
-                { label: 'К оплате', value: `${(summaryKPI.totalCost - summaryKPI.paidAmount).toLocaleString('ru')} ₽`, icon: 'ri-coins-line', color: 'text-blue-900', bg: 'bg-slate-50', border: 'border-slate-200' },
+                { label: 'К оплате', value: formatGroupedAmounts(summaryDebtByCurrency), icon: 'ri-coins-line', color: 'text-blue-900', bg: 'bg-slate-50', border: 'border-slate-200' },
               ].map((kpi) => (
                 <div key={kpi.label} className={`bg-white rounded-xl border ${kpi.border} p-4 flex items-center gap-3`}>
                   <div className={`w-10 h-10 flex items-center justify-center rounded-xl ${kpi.bg} flex-shrink-0`}>
@@ -495,7 +511,7 @@ export default function ClientReportsPage() {
                                 <span className="text-sm font-bold text-red-500 bg-red-50 px-2.5 py-1 rounded-full whitespace-nowrap">Не оплачено</span>
                               )}
                             </td>
-                            <td className="px-5 py-3 text-right font-bold text-gray-700 whitespace-nowrap text-sm">{l.clientCost.toLocaleString('ru')} ₽</td>
+                            <td className="px-5 py-3 text-right font-bold text-gray-700 whitespace-nowrap text-sm">{formatMoney(l.clientCost, mockProjects.find((p) => p.id === l.projectId)?.currency)}</td>
                           </tr>
                         ))}
                       </LinkTable>
@@ -547,7 +563,7 @@ export default function ClientReportsPage() {
                                   <span className="text-sm font-bold text-red-500 bg-red-50 px-2.5 py-1 rounded-full whitespace-nowrap">Не оплачено</span>
                                 )}
                               </td>
-                              <td className="px-5 py-3 text-right font-bold text-gray-700 whitespace-nowrap text-sm">{l.clientCost.toLocaleString('ru')} ₽</td>
+                              <td className="px-5 py-3 text-right font-bold text-gray-700 whitespace-nowrap text-sm">{formatMoney(l.clientCost, mockProjects.find((p) => p.id === l.projectId)?.currency)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -592,7 +608,7 @@ export default function ClientReportsPage() {
                                 <StatusBadge status={l.status} type="link" />
                               </td>
                               <td className="px-5 py-3 text-sm text-gray-500 whitespace-nowrap">{l.clientPaidDate || '—'}</td>
-                              <td className="px-5 py-3 text-right font-bold text-emerald-600 whitespace-nowrap text-sm">{(l.clientPaidAmount || l.clientCost).toLocaleString('ru')} ₽</td>
+                              <td className="px-5 py-3 text-right font-bold text-emerald-600 whitespace-nowrap text-sm">{formatMoney(l.clientPaidAmount || l.clientCost, mockProjects.find((p) => p.id === l.projectId)?.currency)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -643,7 +659,7 @@ export default function ClientReportsPage() {
                                   <span className="text-gray-500">{l.deadline || '—'}</span>
                                 )}
                               </td>
-                              <td className="px-5 py-3 text-right font-bold text-rose-500 whitespace-nowrap text-sm">{l.clientCost.toLocaleString('ru')} ₽</td>
+                              <td className="px-5 py-3 text-right font-bold text-rose-500 whitespace-nowrap text-sm">{formatMoney(l.clientCost, mockProjects.find((p) => p.id === l.projectId)?.currency)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -682,8 +698,8 @@ export default function ClientReportsPage() {
                             <td className="px-5 py-3.5 text-center text-amber-600 font-bold text-sm">{s.inWork}</td>
                             <td className="px-5 py-3.5 text-center text-rose-600 font-bold text-sm">{s.returned}</td>
                             <td className="px-5 py-3.5 text-center text-rose-500 font-bold text-sm">{s.overdue}</td>
-                            <td className="px-5 py-3.5 text-right font-bold text-rose-500 text-sm">{(s.totalCost - s.paidAmount).toLocaleString('ru')} ₽</td>
-                            <td className="px-5 py-3.5 text-right font-bold text-emerald-600 text-sm">{s.paidAmount.toLocaleString('ru')} ₽</td>
+                            <td className="px-5 py-3.5 text-right font-bold text-rose-500 text-sm">{formatMoney(s.totalCost - s.paidAmount, mockProjects.find((p) => p.name === s.name)?.currency)}</td>
+                            <td className="px-5 py-3.5 text-right font-bold text-emerald-600 text-sm">{formatMoney(s.paidAmount, mockProjects.find((p) => p.name === s.name)?.currency)}</td>
                           </tr>
                         ))}
                         {projectStats.length === 0 && (
@@ -774,7 +790,7 @@ export default function ClientReportsPage() {
                             )}
                           </td>
                           <td className="px-5 py-3 text-right font-bold text-gray-700 whitespace-nowrap text-sm">
-                            {l.clientCost.toLocaleString('ru')} ₽
+                            {formatMoney(l.clientCost, mockProjects.find((p) => p.id === l.projectId)?.currency)}
                           </td>
                         </tr>
                       ))}
@@ -821,11 +837,11 @@ export default function ClientReportsPage() {
                     <div className="flex flex-wrap items-center gap-5 text-sm pt-3 border-t border-gray-100">
                       <div className="flex items-center gap-2">
                         <span className="text-gray-500 font-medium">Оплачено:</span>
-                        <span className="font-bold text-emerald-600">{s.paidAmount.toLocaleString('ru')} ₽</span>
+                        <span className="font-bold text-emerald-600">{formatMoney(s.paidAmount, mockProjects.find((p) => p.name === s.name)?.currency)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-500 font-medium">К оплате:</span>
-                        <span className="font-bold text-rose-500">{(s.totalCost - s.paidAmount).toLocaleString('ru')} ₽</span>
+                        <span className="font-bold text-rose-500">{formatMoney(s.totalCost - s.paidAmount, mockProjects.find((p) => p.name === s.name)?.currency)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <span className="text-gray-500 font-medium">Просрочено:</span>

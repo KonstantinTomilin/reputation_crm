@@ -2,6 +2,7 @@ import { useState } from 'react';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { formatMoney } from '@/lib/currency';
 import type { CRMUser, UserRole } from '@/mocks/crm';
 
 const roleDisplayNames: Record<UserRole, string> = {
@@ -98,7 +99,7 @@ export default function MainAdminDashboardPage() {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-emerald-50 mb-2">
               <i className="ri-money-cny-circle-line text-emerald-600 text-lg" />
             </div>
-            <div className="text-xl font-bold text-gray-800">{`${totalRevenue.toLocaleString('ru')} ₽`}</div>
+            <div className="text-xl font-bold text-gray-800">{formatMoney(totalRevenue, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">за всё время</div>
           </div>
 
@@ -106,7 +107,7 @@ export default function MainAdminDashboardPage() {
             <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-50 mb-2">
               <i className="ri-alert-line text-red-600 text-lg" />
             </div>
-            <div className="text-xl font-bold text-gray-800">{`${totalDebt.toLocaleString('ru')} ₽`}</div>
+            <div className="text-xl font-bold text-gray-800">{formatMoney(totalDebt, 'RUB')}</div>
             <div className="text-xs text-gray-500 mt-0.5">по клиентам</div>
           </div>
         </div>

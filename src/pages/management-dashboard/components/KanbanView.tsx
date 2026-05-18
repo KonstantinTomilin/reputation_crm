@@ -1,80 +1,116 @@
 import { useState, useMemo } from 'react';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
-import type { CRMLink } from '@/mocks/crm';
+import { formatMoney } from '@/lib/currency';
+import { todayISO, isOverdue } from '@/lib/dateUtils';
+import { COMPLETED_WORK_STATUSES } from '@/lib/linkFinance';
+import type { CRMLink, LinkStatus } from '@/mocks/crm';
 
-const kanbanColumns = [
-  { status: 'ожидает аудита', title: 'Ожидает аудита', color: 'border-t-4 border-gray-400' },
-  { status: 'в работе', title: 'В работе', color: 'border-t-4 border-blue-400' },
-  { status: 'в карантине', title: 'В карантине', color: 'border-t-4 border-orange-400' },
-  { status: 'вернулось', title: 'Вернувшиеся', color: 'border-t-4 border-red-400' },
-  { status: 'готово', title: 'Готово', color: 'border-t-4 border-cyan-400' },
-  { status: 'сдано', title: 'Сдано', color: 'border-t-4 border-indigo-400' },
-  { status: 'удалено', title: 'Удалено', color: 'border-t-4 border-green-400' },
+type KanbanColumn =
+  | { kind: 'status'; status: LinkStatus | LinkStatus[]; title: string; color: string }
+  | { kind: 'overdue'; title: string; color: string };
+
+const kanbanColumns: KanbanColumn[] = [
+  { kind: 'status', status: 'новый', title: 'Новые', color: 'border-t-4 border-slate-400' },
+  { kind: 'status', status: 'ожидает аудита', title: 'Ожидает аудита', color: 'border-t-4 border-pink-400' },
+  { kind: 'status', status: 'в аудите', title: 'На аудите', color: 'border-t-4 border-amber-400' },
+  { kind: 'status', status: 'в работе', title: 'В работе', color: 'border-t-4 border-blue-400' },
+  { kind: 'status', status: 'готово', title: 'Готово к проверке', color: 'border-t-4 border-cyan-400' },
+  { kind: 'status', status: ['согласовано', 'принято'], title: 'Подтверждено админом', color: 'border-t-4 border-emerald-400' },
+  { kind: 'status', status: ['отправлено клиенту', 'сдано клиенту'], title: 'Отправлено клиенту', color: 'border-t-4 border-indigo-400' },
+  { kind: 'status', status: 'в карантине', title: 'Карантин', color: 'border-t-4 border-orange-400' },
+  { kind: 'overdue', title: 'Просрочено', color: 'border-t-4 border-red-500' },
 ];
+
+function matchColumn(link: CRMLink, col: KanbanColumn): boolean {
+  const overdue = isOverdue(link.deadline, COMPLETED_WORK_STATUSES, link.status);
+  if (col.kind === 'overdue') {
+    return overdue;
+  }
+  // Avoid duplicate cards in status columns and "Просрочено".
+  if (overdue) return false;
+  const statuses = Array.isArray(col.status) ? col.status : [col.status];
+  return statuses.includes(link.status);
+}
 
 export default function KanbanView() {
   const crm = useCRM();
-  const mockLinks = crm.links;
-  const mockProjects = crm.projects;
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [selectedLink, setSelectedLink] = useState<CRMLink | null>(null);
 
+  const activeLinks = useMemo(() => crm.links.filter((l) => !l.isDeleted), [crm.links]);
+
   const filteredLinks = useMemo(() => {
-    if (projectFilter === 'all') return mockLinks;
-    return mockLinks.filter((l) => String(l.projectId) === projectFilter);
-  }, [projectFilter, mockLinks]);
+    if (projectFilter === 'all') return activeLinks;
+    return activeLinks.filter((l) => String(l.projectId) === projectFilter);
+  }, [projectFilter, activeLinks]);
+
+  const getProject = (id: number) => crm.projects.find((p) => p.id === id);
+  const getClientName = (clientId: number) =>
+    crm.clients.find((c) => c.id === clientId)?.companyName ?? '—';
+  const getExecutorName = (executorId: number | null) =>
+    executorId ? crm.users.find((u) => u.id === executorId)?.fullName ?? '—' : '—';
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      <div className="flex items-center gap-3">
-        <label className="text-sm font-medium text-gray-600">Фильтр по проекту:</label>
+      <div className="flex items-center gap-3 flex-wrap">
+        <label className="text-sm font-medium text-gray-600">Проект:</label>
         <select
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-slate-400 bg-white cursor-pointer"
+          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white cursor-pointer"
         >
           <option value="all">Все проекты</option>
-          {mockProjects.map((p) => (
+          {crm.projects.filter((p) => !p.isDeleted).map((p) => (
             <option key={p.id} value={String(p.id)}>{p.name}</option>
           ))}
         </select>
-        <span className="text-xs text-gray-400 ml-auto">{filteredLinks.length} ссылок</span>
+        <span className="text-xs text-gray-400 ml-auto">{filteredLinks.length} ссылок · {todayISO()}</span>
       </div>
 
       <div className="flex-1 overflow-x-auto">
-        <div className="flex gap-3 min-w-[1300px] h-full">
+        <div className="flex gap-3 min-w-[1600px] h-full pb-2">
           {kanbanColumns.map((col) => {
-            const colLinks = filteredLinks.filter((l) => l.status === col.status);
+            const colLinks = filteredLinks.filter((l) => matchColumn(l, col));
             return (
-              <div key={col.status} className={`flex-1 flex flex-col bg-white rounded-xl border border-slate-200 ${col.color} min-w-[220px]`}>
+              <div
+                key={col.title}
+                className={`flex-1 flex flex-col bg-white rounded-xl border border-slate-200 ${col.color} min-w-[200px]`}
+              >
                 <div className="px-3 py-2.5 border-b border-slate-50 flex items-center justify-between">
                   <span className="text-xs font-bold text-gray-700">{col.title}</span>
                   <span className="text-xs font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">{colLinks.length}</span>
                 </div>
-                <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2">
-                  {colLinks.map((link) => (
-                    <button
-                      key={link.id}
-                      onClick={() => setSelectedLink(link)}
-                      className="text-left bg-gray-50 hover:bg-slate-50 border border-gray-100 hover:border-slate-200 rounded-lg p-2.5 transition-all cursor-pointer"
-                    >
-                      <div className="text-[11px] text-blue-900 font-mono truncate">{link.url}</div>
-                      <div className="flex items-center gap-1.5 mt-1.5">
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${link.type === 'удаление' ? 'bg-red-50 text-red-600' : link.type === 'деиндексация' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
-                          {link.type === 'удаление+деиндексация' ? 'удаление\\деиндексация' : link.type}
-                        </span>
-                        {link.deadline && (
-                          <span className={`text-[10px] ${new Date(link.deadline) < new Date('2024-12-01') ? 'text-red-500' : 'text-gray-400'}`}>
-                            <i className="ri-time-line" /> {link.deadline}
+                <div className="flex-1 overflow-y-auto p-2.5 flex flex-col gap-2 max-h-[70vh]">
+                  {colLinks.map((link) => {
+                    const project = getProject(link.projectId);
+                    const currency = project?.currency ?? 'RUB';
+                    const overdue = isOverdue(link.deadline, COMPLETED_WORK_STATUSES, link.status);
+                    return (
+                      <button
+                        key={link.id}
+                        type="button"
+                        onClick={() => setSelectedLink(link)}
+                        className={`text-left bg-gray-50 hover:bg-slate-50 border rounded-lg p-2.5 transition-all cursor-pointer ${
+                          overdue ? 'border-red-200' : 'border-gray-100'
+                        }`}
+                      >
+                        <div className="text-[11px] text-blue-900 font-mono truncate">{link.url}</div>
+                        <div className="text-[10px] text-gray-500 mt-1 truncate">{project?.name} · {getClientName(link.clientId)}</div>
+                        <div className="text-[10px] text-gray-400 truncate">Исп.: {getExecutorName(link.executorId)}</div>
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{link.type}</span>
+                          <StatusBadge status={link.status} size="sm" />
+                        </div>
+                        <div className="flex justify-between mt-1.5 text-[10px]">
+                          <span className={overdue ? 'text-red-500 font-semibold' : 'text-gray-400'}>
+                            {link.deadline ? `до ${link.deadline}` : 'без дедлайна'}
                           </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-gray-400 mt-1">
-                        {mockProjects.find((p) => p.id === link.projectId)?.name || '—'}
-                      </div>
-                    </button>
-                  ))}
+                          <span className="font-semibold text-gray-700">{formatMoney(link.clientCost, currency)}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
                   {colLinks.length === 0 && <div className="text-center py-4 text-xs text-gray-300">Нет ссылок</div>}
                 </div>
               </div>
@@ -83,40 +119,29 @@ export default function KanbanView() {
         </div>
       </div>
 
-      {/* Link detail modal */}
       {selectedLink && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setSelectedLink(null)}>
-          <div className="bg-white rounded-2xl p-6 w-full max-w-lg flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-gray-800">Детали ссылки</h3>
-              <button onClick={() => setSelectedLink(null)} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 cursor-pointer">
-                <i className="ri-close-line text-gray-400" />
-              </button>
-            </div>
-            <div className="text-sm text-blue-900 font-mono break-all">{selectedLink.url}</div>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-bold text-gray-800 mb-2">Ссылка #{selectedLink.id}</h3>
+            <p className="text-sm text-blue-900 font-mono break-all mb-3">{selectedLink.url}</p>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-400">Проект</div>
-                <div className="font-semibold text-gray-700">{mockProjects.find((p) => p.id === selectedLink.projectId)?.name || '—'}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-400">Тип</div>
-                <div className="font-semibold text-gray-700">{selectedLink.type}</div>
-              </div>
-              <div className="bg-gray-50 rounded-lg p-3">
-                <div className="text-xs text-gray-400">Статус</div>
-                <StatusBadge status={selectedLink.status} />
+                <div className="font-semibold">{getProject(selectedLink.projectId)?.name}</div>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
                 <div className="text-xs text-gray-400">Стоимость</div>
-                <div className="font-semibold text-gray-700">{selectedLink.clientCost.toLocaleString('ru')} ₽</div>
+                <div className="font-semibold">
+                  {formatMoney(selectedLink.clientCost, getProject(selectedLink.projectId)?.currency)}
+                </div>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3 col-span-2">
+                <StatusBadge status={selectedLink.status} />
               </div>
             </div>
-            {selectedLink.deadline && (
-              <div className={`text-sm ${new Date(selectedLink.deadline) < new Date('2024-12-01') ? 'text-red-500' : 'text-gray-500'}`}>
-                <i className="ri-time-line" /> Дедлайн: {selectedLink.deadline}
-              </div>
-            )}
+            <button type="button" onClick={() => setSelectedLink(null)} className="mt-4 w-full py-2 border rounded-lg text-sm cursor-pointer">
+              Закрыть
+            </button>
           </div>
         </div>
       )}

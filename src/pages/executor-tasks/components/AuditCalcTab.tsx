@@ -264,7 +264,7 @@ export default function AuditCalcTab({ executorId, linksList, projects, clients,
                           className="w-full bg-white border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-700 focus:outline-none focus:border-slate-400"
                           min={0}
                         />
-                        <span className="text-xs text-gray-400 whitespace-nowrap">₽</span>
+                        <span className="text-xs text-gray-400 whitespace-nowrap">валюта проекта</span>
                       </div>
                     </div>
                   ))}

@@ -50,6 +50,9 @@ export type TaskStatus = 'new' | 'in_progress' | 'paused' | 'done';
 export type ProjectStatus = 'новый' | 'в работе' | 'на паузе' | 'завершён' | 'просрочен';
 export type PaymentType = 'оплата клиента' | 'выплата исполнителю';
 export type PaymentStatus = 'запланирован' | 'оплачен' | 'просрочен';
+export type ClientPaymentStatus = 'unpaid' | 'partially_paid' | 'paid';
+export type ExecutorPaymentStatus = 'not_accrued' | 'accrued' | 'paid_to_executor';
+export type CurrencyCode = 'RUB' | 'USD' | 'EUR' | 'AED';
 export type RiskLevel = 'низкий' | 'средний' | 'высокий';
 
 // === ЦЕЛЕВЫЕ ПОИСКОВЫЕ СИСТЕМЫ ===
@@ -70,6 +73,9 @@ export interface CRMUser {
   language: 'ru' | 'en';
   status: 'активен' | 'заблокирован';
   alias: string | null; // для обезличивания
+  /** Для роли client — привязка к CRMClient.id */
+  linkedClientId?: number | null;
+  isDeleted?: boolean;
 }
 
 // === КЛИЕНТ ===
@@ -79,7 +85,8 @@ export interface CRMClient {
   contacts: string;
   status: 'активен' | 'на паузе';
   totalDebt: number;
-  currency?: 'RUB' | 'USD' | 'EUR' | 'AED';
+  currency?: CurrencyCode;
+  isDeleted?: boolean;
 }
 
 // === ПРОЕКТ ===
@@ -98,8 +105,9 @@ export interface CRMProject {
   startDate: string;
   deadline: string | null;
   manager: string;
-  currency: 'RUB' | 'USD' | 'EUR' | 'AED';
+  currency: CurrencyCode;
   source: string;
+  isDeleted?: boolean;
 }
 
 // === КОММЕНТАРИЙ С ИСТОРИЕЙ ===
@@ -130,12 +138,17 @@ export interface CRMLink {
   auditorId: number | null;
   clientCost: number;
   executorCost: number;
+  /** @deprecated use clientPaymentStatus — kept for migration */
   clientPaid: boolean;
   clientPaidDate: string | null;
   clientPaidAmount: number | null;
+  clientPaymentStatus?: ClientPaymentStatus;
+  /** @deprecated use executorPaymentStatus */
   executorPaid: boolean;
   executorPaidDate: string | null;
   executorPaidAmount: number | null;
+  executorPaymentStatus?: ExecutorPaymentStatus;
+  isDeleted?: boolean;
   comments: LinkComment[];
   proofsFolder: string | null;
   proofFiles: string[];
@@ -159,8 +172,10 @@ export interface CRMAudit {
   auditorId: number;
   notes: string;
   priority?: 'низкий' | 'средний' | 'высокий' | 'критичный';
-  currency?: 'RUB' | 'USD' | 'EUR' | 'AED';
+  currency?: CurrencyCode;
   workType?: 'удаление' | 'деиндексация' | 'удаление+деиндексация';
+  auditType?: 'расчет стоимости' | 'вероятность удаления' | 'поиск негатива' | 'проверка ссылки';
+  auditStatus?: 'новый' | 'в работе' | 'завершён';
 }
 
 // === ПЛАТЁЖ ===
@@ -170,7 +185,7 @@ export interface CRMPayment {
   projectId: number | null;
   linkId: number | null;
   amount: number;
-  currency: 'RUB' | 'USD' | 'EUR' | 'AED';
+  currency: CurrencyCode;
   date: string;
   type: PaymentType;
   status: PaymentStatus;
@@ -190,6 +205,32 @@ export interface CRMTask {
   status: TaskStatus;
   progress: number;
 }
+
+export interface CRMNotification {
+  id: string;
+  userId: number;
+  role: UserRole | 'management';
+  title: string;
+  message: string;
+  link: string;
+  read: boolean;
+  type: 'info' | 'success' | 'warning' | 'danger';
+  createdAt: string;
+}
+
+export interface CRMSettings {
+  notificationsEnabled: boolean;
+  soundNotificationsEnabled: boolean;
+  anonymizeExecutors: boolean;
+  autoAuditNewLinks: boolean;
+}
+
+export const defaultCRMSettings: CRMSettings = {
+  notificationsEnabled: true,
+  soundNotificationsEnabled: false,
+  anonymizeExecutors: false,
+  autoAuditNewLinks: false,
+};
 
 export interface TopClient {
   id: number;

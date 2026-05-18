@@ -58,6 +58,12 @@ const paymentStatusConfig: Record<string, { label: string; bg: string; text: str
   'запланирован': { label: 'Запланирован', bg: 'bg-slate-100',  text: 'text-slate-600' },
   'оплачен':      { label: 'Оплачен',      bg: 'bg-green-100',  text: 'text-green-700' },
   'просрочен':    { label: 'Просрочен',    bg: 'bg-red-100',    text: 'text-red-700' },
+  unpaid: { label: 'Не оплачено', bg: 'bg-red-100', text: 'text-red-700' },
+  partially_paid: { label: 'Частично оплачено', bg: 'bg-amber-100', text: 'text-amber-700' },
+  paid: { label: 'Оплачено', bg: 'bg-green-100', text: 'text-green-700' },
+  not_accrued: { label: 'Не начислено', bg: 'bg-slate-100', text: 'text-slate-600' },
+  accrued: { label: 'Начислено', bg: 'bg-blue-100', text: 'text-blue-700' },
+  paid_to_executor: { label: 'Выплачено исполнителю', bg: 'bg-green-100', text: 'text-green-700' },
 };
 
 interface StatusBadgeProps {

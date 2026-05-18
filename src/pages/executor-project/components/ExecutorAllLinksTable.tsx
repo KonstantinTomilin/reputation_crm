@@ -3,6 +3,7 @@ import type { CRMLink, LinkStatus, WorkType } from '@/mocks/crm';
 import StatusBadge from '@/components/base/StatusBadge';
 import LinkComments from './LinkComments';
 import { useCRM } from '@/context/CRMContext';
+import { formatMoney } from '@/lib/currency';
 
 interface Props {
   links: CRMLink[];
@@ -388,10 +389,10 @@ export default function ExecutorAllLinksTable({
                     </td>
 
                     <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">
-                      {link.clientCost.toLocaleString('ru-RU')} ₽
+                      {formatMoney(link.clientCost, crm.projects.find((p) => p.id === link.projectId)?.currency)}
                     </td>
                     <td className="px-3 py-3 text-xs font-semibold text-blue-800 whitespace-nowrap">
-                      {link.executorCost.toLocaleString('ru-RU')} ₽
+                      {formatMoney(link.executorCost, crm.projects.find((p) => p.id === link.projectId)?.currency)}
                     </td>
 
                     {/* Executor paid toggle */}

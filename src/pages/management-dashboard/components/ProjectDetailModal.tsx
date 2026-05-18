@@ -1,15 +1,17 @@
 import { useState, useMemo } from 'react';
 import { useCRM } from '@/context/CRMContext';
 import StatusBadge from '@/components/base/StatusBadge';
+import { formatMoney } from '@/lib/currency';
 import type { CRMProject, ProjectStatus, CRMLink } from '@/mocks/crm';
 
 interface Props {
   project: CRMProject;
   onClose: () => void;
   onSave: (updated: CRMProject) => void;
+  onExportPdf?: (projectId: number) => void;
 }
 
-export default function ProjectDetailModal({ project, onClose, onSave }: Props) {
+export default function ProjectDetailModal({ project, onClose, onSave, onExportPdf }: Props) {
   const crm = useCRM();
   const [tab, setTab] = useState<'info' | 'links'>('info');
   const [form, setForm] = useState({
@@ -45,9 +47,21 @@ export default function ProjectDetailModal({ project, onClose, onSave }: Props) 
             <h3 className="text-base font-bold text-gray-800 truncate">{project.name}</h3>
             <p className="text-xs text-gray-500 mt-0.5">{project.domain || '—'} · {project.currency}</p>
           </div>
-          <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 cursor-pointer shrink-0 ml-3">
-            <i className="ri-close-line text-gray-500" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            {onExportPdf && (
+              <button
+                type="button"
+                onClick={() => onExportPdf(project.id)}
+                className="px-3 py-1.5 text-xs font-semibold bg-blue-900 text-white rounded-lg cursor-pointer whitespace-nowrap"
+              >
+                <i className="ri-file-pdf-line mr-1" />
+                PDF отчёт
+              </button>
+            )}
+            <button type="button" onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 cursor-pointer">
+              <i className="ri-close-line text-gray-500" />
+            </button>
+          </div>
         </div>
 
         {/* Tabs */}
@@ -205,17 +219,30 @@ export default function ProjectDetailModal({ project, onClose, onSave }: Props) 
                           <td className="px-4 py-3"><StatusBadge status={link.status} type="link" /></td>
                           <td className="px-4 py-3 text-xs text-gray-500">{link.geo ? link.geo.split(',')[0] : '—'}</td>
                           <td className="px-4 py-3 text-xs text-gray-600">{getExecutorName(link.executorId)}</td>
-                          <td className="px-4 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">{link.clientCost.toLocaleString('ru')} {project.currency}</td>
+                          <td className="px-4 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">{formatMoney(link.clientCost, project.currency)}</td>
                           <td className="px-4 py-3">
-                            {link.clientPaid ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium">
-                                <i className="ri-checkbox-circle-line" /> Опл.
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] text-red-500 font-medium">
-                                <i className="ri-close-circle-line" /> Нет
-                              </span>
-                            )}
+                            {(() => {
+                              const p = link.clientPaymentStatus ?? (link.clientPaid ? 'paid' : 'unpaid');
+                              if (p === 'paid') {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 font-medium">
+                                    <i className="ri-checkbox-circle-line" /> Опл.
+                                  </span>
+                                );
+                              }
+                              if (p === 'partially_paid') {
+                                return (
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 font-medium">
+                                    <i className="ri-time-line" /> Частично
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-red-500 font-medium">
+                                  <i className="ri-close-circle-line" /> Нет
+                                </span>
+                              );
+                            })()}
                           </td>
                         </tr>
                       ))}

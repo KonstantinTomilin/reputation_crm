@@ -2,6 +2,9 @@ import { useState, useMemo } from 'react';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
+import { defaultProjectDeadline } from '@/lib/dateUtils';
+import { formatMoney } from '@/lib/currency';
 import type { CRMLink, WorkType, SearchEngineFlags } from '@/mocks/crm';
 
 const COUNTRIES = [
@@ -19,6 +22,7 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
 
 export default function AuditorActivePage() {
   const crm = useCRM();
+  const scope = useRoleScope();
   const [searchQuery, setSearchQuery] = useState('');
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [geoFilter, setGeoFilter] = useState<string>('all');
@@ -54,14 +58,14 @@ export default function AuditorActivePage() {
 
   // Все ссылки аудитора: в аудите, новые, аудит выполнен, или отклонённые для повторной работы
   const auditorLinks = useMemo(() => {
-    return crm.links.filter(
+    return scope.links.filter(
       (l) =>
         l.status === 'в аудите' ||
         l.status === 'новый' ||
         l.status === 'аудит выполнен' ||
         l.status === 'отклонено'
     );
-  }, [crm.links, tick]);
+  }, [scope.links, tick]);
 
   const uniqueGeos = Array.from(
     new Set(auditorLinks.map((l) => (l.geo ? l.geo.split(',')[0] : null)).filter(Boolean))
@@ -153,11 +157,11 @@ export default function AuditorActivePage() {
       addedDate: new Date().toISOString().split('T')[0],
       startDate: null,
       endDate: null,
-      deadline: null,
+      deadline: crm.projects.find((p) => p.id === Number(newProjectId))?.deadline || defaultProjectDeadline(),
       quarantineDays: 0,
       quarantineEndDate: null,
       executorId: null,
-      auditorId: 9,
+      auditorId: scope.auditorId ?? null,
       clientCost: 0,
       executorCost: 0,
       clientPaid: false,
@@ -243,7 +247,7 @@ export default function AuditorActivePage() {
                 className="appearance-none bg-white border border-slate-200 rounded-lg pl-3 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:border-slate-400 cursor-pointer"
               >
                 <option value="all">Все проекты</option>
-                {crm.projects.map((p) => (
+                {scope.projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
@@ -496,7 +500,7 @@ export default function AuditorActivePage() {
                       ].map((s) => (
                         <div key={s.ps} className="flex justify-between text-sm">
                           <span className="text-gray-600">{s.ps}</span>
-                          <span className="font-semibold text-gray-800">{s.cost.toLocaleString('ru')} ₽ <span className="text-gray-400 font-normal">(~{Math.round(s.cost / 85).toLocaleString('ru')} $)</span></span>
+                          <span className="font-semibold text-gray-800">{formatMoney(s.cost, crm.projects.find((p) => p.id === activeLink.projectId)?.currency)}</span>
                         </div>
                       ))}
                     </div>

@@ -2,6 +2,7 @@ import CRMLayout from '@/components/feature/CRMLayout';
 import KPICard from '@/components/base/KPICard';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { formatMoney } from '@/lib/currency';
 import { useState } from 'react';
 
 export default function ManagerDashboardPage() {
@@ -105,13 +106,13 @@ export default function ManagerDashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KPICard
             label="Выручка"
-            value={`${totalRevenue.toLocaleString('ru')} ₽`}
+            value={formatMoney(totalRevenue, 'RUB')}
             icon="ri-coins-line"
             accent="text-green-600"
           />
           <KPICard
             label="Выплаты исполн."
-            value={`${totalPayouts.toLocaleString('ru')} ₽`}
+            value={formatMoney(totalPayouts, 'RUB')}
             icon="ri-hand-coin-line"
             accent="text-orange-600"
           />

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { formatMoney } from '@/lib/currency';
 import type { CRMLink } from '@/mocks/crm';
 
 interface Props {
@@ -91,7 +92,7 @@ export default function LinkDetailModal({ link, onClose }: Props) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-green-50 rounded-xl p-4 border border-green-100">
               <div className="text-xs font-semibold text-green-700 uppercase tracking-wider mb-1">Стоимость для клиента</div>
-              <div className="text-xl font-bold text-gray-800">{link.clientCost.toLocaleString('ru-RU')} ₽</div>
+              <div className="text-xl font-bold text-gray-800">{formatMoney(link.clientCost, project?.currency)}</div>
               <div className="flex items-center gap-2 mt-2">
                 {link.clientPaid ? (
                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-600 bg-white px-2 py-0.5 rounded-full">
@@ -106,7 +107,7 @@ export default function LinkDetailModal({ link, onClose }: Props) {
             </div>
             <div className="bg-orange-50 rounded-xl p-4 border border-orange-100">
               <div className="text-xs font-semibold text-orange-700 uppercase tracking-wider mb-1">Стоимость для исполнителя</div>
-              <div className="text-xl font-bold text-gray-800">{link.executorCost.toLocaleString('ru-RU')} ₽</div>
+              <div className="text-xl font-bold text-gray-800">{formatMoney(link.executorCost, project?.currency)}</div>
               <div className="flex items-center gap-2 mt-2">
                 {link.executorPaid ? (
                   <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-600 bg-white px-2 py-0.5 rounded-full">

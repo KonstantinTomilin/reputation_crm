@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import type { CRMLink } from '@/mocks/crm';
 import StatusBadge from '@/components/base/StatusBadge';
+import { formatMoney } from '@/lib/currency';
 
 interface Props {
   links: CRMLink[];
@@ -289,7 +290,7 @@ export default function ClientLinksTable({ links }: Props) {
                 </td>
                 <td className="px-4 py-3.5">
                   <span className="text-[13px] font-semibold text-gray-700 tabular-nums whitespace-nowrap">
-                    {link.clientCost.toLocaleString('ru-RU')} ₽
+                    {formatMoney(link.clientCost, (link as { currency?: string }).currency)}
                   </span>
                 </td>
                 <td className="px-4 py-3.5">

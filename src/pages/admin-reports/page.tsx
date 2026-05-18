@@ -2,6 +2,7 @@ import { useState } from 'react';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { formatGroupedAmounts, formatMoney, groupAmountsByCurrency, normalizeCurrency } from '@/lib/currency';
 
 export default function AdminReportsPage() {
   const crm = useCRM();
@@ -31,6 +32,31 @@ export default function AdminReportsPage() {
     .reduce((sum, p) => sum + p.amount, 0);
   const profit = totalRevenue - totalPayouts;
   const overduePayments = mockPayments.filter((p) => p.status === 'просрочен').length;
+  const billedByCurrency = groupAmountsByCurrency(
+    mockPayments
+      .filter((p) => p.type === 'оплата клиента' && (p.status === 'оплачен' || p.status === 'запланирован'))
+      .map((p) => ({ amount: p.amount, currency: p.currency }))
+  );
+  const paidByCurrency = groupAmountsByCurrency(
+    mockPayments
+      .filter((p) => p.type === 'оплата клиента' && p.status === 'оплачен')
+      .map((p) => ({ amount: p.amount, currency: p.currency }))
+  );
+  const pendingByCurrency = groupAmountsByCurrency(
+    mockPayments
+      .filter((p) => p.type === 'оплата клиента' && p.status === 'запланирован')
+      .map((p) => ({ amount: p.amount, currency: p.currency }))
+  );
+  const payoutsByCurrency = groupAmountsByCurrency(
+    mockPayments
+      .filter((p) => p.type === 'выплата исполнителю' && p.status === 'оплачен')
+      .map((p) => ({ amount: p.amount, currency: p.currency }))
+  );
+  const profitByCurrency = Object.keys({ ...paidByCurrency, ...payoutsByCurrency }).reduce<Record<string, number>>((acc, currency) => {
+    const code = normalizeCurrency(currency);
+    acc[code] = (paidByCurrency[code] ?? 0) - (payoutsByCurrency[code] ?? 0);
+    return acc;
+  }, {});
 
   // Links accepted by clients
   const acceptedByClient = mockLinks.filter((l) => l.status === 'принято').length;
@@ -87,11 +113,11 @@ export default function AdminReportsPage() {
           <h3 className="text-sm font-bold text-gray-800 mb-4">Финансовая сводка</h3>
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             {[
-              { label: 'Выставлено клиентам', value: `${(totalRevenue + totalPending).toLocaleString('ru')} ₽`, color: 'text-gray-800' },
-              { label: 'Оплачено клиентами', value: `${totalRevenue.toLocaleString('ru')} ₽`, color: 'text-green-600' },
-              { label: 'Осталось к оплате', value: `${totalPending.toLocaleString('ru')} ₽`, color: 'text-orange-600' },
-              { label: 'Выплачено исполнителям', value: `${totalPayouts.toLocaleString('ru')} ₽`, color: 'text-blue-600' },
-              { label: 'Прибыль (маржа)', value: `${profit.toLocaleString('ru')} ₽`, color: profit > 0 ? 'text-green-600' : 'text-red-600' },
+              { label: 'Выставлено клиентам', value: formatGroupedAmounts(billedByCurrency), color: 'text-gray-800' },
+              { label: 'Оплачено клиентами', value: formatGroupedAmounts(paidByCurrency), color: 'text-green-600' },
+              { label: 'Осталось к оплате', value: formatGroupedAmounts(pendingByCurrency), color: 'text-orange-600' },
+              { label: 'Выплачено исполнителям', value: formatGroupedAmounts(payoutsByCurrency), color: 'text-blue-600' },
+              { label: 'Прибыль (маржа)', value: formatGroupedAmounts(profitByCurrency), color: profit > 0 ? 'text-green-600' : 'text-red-600' },
             ].map((s) => (
               <div key={s.label} className="bg-gray-50 rounded-xl p-4 border border-gray-100">
                 <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">{s.label}</div>
@@ -142,9 +168,9 @@ export default function AdminReportsPage() {
                           <span className="text-xs font-bold text-gray-700">{project.successRate}%</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{revenue.toLocaleString('ru')} ₽</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{payouts.toLocaleString('ru')} ₽</td>
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{(revenue - payouts).toLocaleString('ru')} ₽</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{formatMoney(revenue, project.currency)}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{formatMoney(payouts, project.currency)}</td>
+                      <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{formatMoney(revenue - payouts, project.currency)}</td>
                     </tr>
                   );
                 })}
@@ -178,9 +204,15 @@ export default function AdminReportsPage() {
                       <tr key={executor.id} className="border-b border-slate-50 hover:bg-slate-50/30">
                         <td className="px-4 py-3 text-sm font-semibold text-gray-800">{executor.fullName}</td>
                         <td className="px-4 py-3 text-sm text-gray-700 text-center">{execLinks.length}</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">{totalCost.toLocaleString('ru')} ₽</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-green-600 whitespace-nowrap">{paid.toLocaleString('ru')} ₽</td>
-                        <td className="px-4 py-3 text-sm font-semibold text-orange-600 whitespace-nowrap">{(totalCost - paid).toLocaleString('ru')} ₽</td>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-700 whitespace-nowrap">
+                          {formatGroupedAmounts(groupAmountsByCurrency(execLinks.map((l) => ({ amount: l.executorCost, currency: mockProjects.find((p) => p.id === l.projectId)?.currency }))))}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-green-600 whitespace-nowrap">
+                          {formatGroupedAmounts(groupAmountsByCurrency(execLinks.filter((l) => l.executorPaid).map((l) => ({ amount: l.executorCost, currency: mockProjects.find((p) => p.id === l.projectId)?.currency }))))}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-orange-600 whitespace-nowrap">
+                          {formatGroupedAmounts(groupAmountsByCurrency(execLinks.filter((l) => !l.executorPaid).map((l) => ({ amount: l.executorCost, currency: mockProjects.find((p) => p.id === l.projectId)?.currency }))))}
+                        </td>
                       </tr>
                     );
                   })}

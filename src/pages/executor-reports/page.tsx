@@ -5,6 +5,7 @@ import StatusBadge from '@/components/base/StatusBadge';
 import type { LinkStatus } from '@/mocks/crm';
 import { useCRM } from '@/context/CRMContext';
 import { useCurrentExecutorId, getCurrentAuthUser } from '@/hooks/useCurrentExecutor';
+import { formatGroupedAmounts, formatMoney, groupAmountsByCurrency } from '@/lib/currency';
 
 export default function ExecutorReportsPage() {
   const [dateFrom, setDateFrom] = useState('2026-04-01');
@@ -62,6 +63,12 @@ export default function ExecutorReportsPage() {
   const totalEarnings = completedLinks.reduce((s, l) => s + l.executorCost, 0);
   const paidEarnings = completedLinks.filter((l) => l.executorPaid).reduce((s, l) => s + l.executorCost, 0);
   const pendingEarnings = totalEarnings - paidEarnings;
+  const totalByCurrency = groupAmountsByCurrency(
+    completedLinks.map((l) => ({ amount: l.executorCost, currency: crm.projects.find((p) => p.id === l.projectId)?.currency }))
+  );
+  const paidByCurrency = groupAmountsByCurrency(
+    completedLinks.filter((l) => l.executorPaid).map((l) => ({ amount: l.executorCost, currency: crm.projects.find((p) => p.id === l.projectId)?.currency }))
+  );
 
   const projectOptions = useMemo(() => {
     const ids = [...new Set(allMyLinks.map((l) => l.projectId))];
@@ -97,7 +104,7 @@ export default function ExecutorReportsPage() {
           <td style="border-bottom:1px solid ${BORDER};padding:7px 10px;font-size:12px;color:${BODY};font-family:Arial,sans-serif">${l.type === 'удаление+деиндексация' ? 'удаление\\деиндексация' : l.type}</td>
           <td style="border-bottom:1px solid ${BORDER};padding:7px 10px;font-size:12px;color:${MUTED};font-family:Arial,sans-serif">${delivery.label}</td>
           <td style="border-bottom:1px solid ${BORDER};padding:7px 10px;font-size:12px;color:${MUTED};font-family:Arial,sans-serif">${l.endDate || '—'}</td>
-          <td style="border-bottom:1px solid ${BORDER};padding:7px 10px;font-size:12px;color:${BODY};text-align:right;font-weight:700;font-family:Arial,sans-serif">${l.executorCost.toLocaleString('ru')} ₽</td>
+          <td style="border-bottom:1px solid ${BORDER};padding:7px 10px;font-size:12px;color:${BODY};text-align:right;font-weight:700;font-family:Arial,sans-serif">${formatMoney(l.executorCost, project?.currency)}</td>
           <td style="border-bottom:1px solid ${BORDER};padding:7px 10px;font-size:12px;color:${payColor};font-weight:700;font-family:Arial,sans-serif">${payStatus}</td>
         </tr>
       `;
@@ -159,11 +166,11 @@ export default function ExecutorReportsPage() {
         </div>
         <div>
           <div style="font-size:10px;color:${MUTED};text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:1px;font-family:Arial,sans-serif">Заработок</div>
-          <div style="font-size:12px;color:${GREEN};font-weight:700;font-family:Arial,sans-serif">${totalEarnings.toLocaleString('ru')} ₽</div>
+          <div style="font-size:12px;color:${GREEN};font-weight:700;font-family:Arial,sans-serif">${formatGroupedAmounts(totalByCurrency)}</div>
         </div>
         <div>
           <div style="font-size:10px;color:${MUTED};text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:1px;font-family:Arial,sans-serif">Выплачено</div>
-          <div style="font-size:12px;color:${BLUE};font-weight:700;font-family:Arial,sans-serif">${paidEarnings.toLocaleString('ru')} ₽</div>
+          <div style="font-size:12px;color:${BLUE};font-weight:700;font-family:Arial,sans-serif">${formatGroupedAmounts(paidByCurrency)}</div>
         </div>
       </div>
 
@@ -281,7 +288,7 @@ export default function ExecutorReportsPage() {
         </td>
         <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">{link.endDate || '—'}</td>
         <td className="px-4 py-3 text-right font-bold text-gray-700 whitespace-nowrap text-sm">
-          {link.executorCost.toLocaleString('ru')} ₽
+          {formatMoney(link.executorCost, crm.projects.find((p) => p.id === link.projectId)?.currency)}
         </td>
         <td className="px-4 py-3 text-center">
           {link.executorPaid ? (
@@ -463,17 +470,25 @@ export default function ExecutorReportsPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="bg-emerald-50 rounded-xl p-5 border border-emerald-100">
                 <div className="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-1">Общий заработок</div>
-                <div className="text-2xl font-bold text-gray-800">{totalEarnings.toLocaleString('ru')} ₽</div>
+                <div className="text-2xl font-bold text-gray-800">{formatGroupedAmounts(totalByCurrency)}</div>
                 <div className="text-xs text-gray-500 mt-1">за выполненные ссылки</div>
               </div>
               <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
                 <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider mb-1">Выплачено</div>
-                <div className="text-2xl font-bold text-gray-800">{paidEarnings.toLocaleString('ru')} ₽</div>
+                <div className="text-2xl font-bold text-gray-800">{formatGroupedAmounts(paidByCurrency)}</div>
                 <div className="text-xs text-gray-500 mt-1">переведено на счёт</div>
               </div>
               <div className="bg-orange-50 rounded-xl p-5 border border-orange-100">
                 <div className="text-xs font-semibold text-orange-700 uppercase tracking-wider mb-1">Ожидает выплаты</div>
-                <div className="text-2xl font-bold text-gray-800">{pendingEarnings.toLocaleString('ru')} ₽</div>
+                <div className="text-2xl font-bold text-gray-800">
+                  {formatGroupedAmounts(
+                    groupAmountsByCurrency(
+                      completedLinks
+                        .filter((l) => !l.executorPaid)
+                        .map((l) => ({ amount: l.executorCost, currency: crm.projects.find((p) => p.id === l.projectId)?.currency }))
+                    )
+                  )}
+                </div>
                 <div className="text-xs text-gray-500 mt-1">запланировано к выплате</div>
               </div>
             </div>

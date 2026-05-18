@@ -3,6 +3,7 @@ import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
 import { useCurrentExecutorId } from '@/hooks/useCurrentExecutor';
+import { formatGroupedAmounts, formatMoney, groupAmountsByCurrency } from '@/lib/currency';
 import type { LinkStatus } from '@/mocks/crm';
 
 const doneStatuses: LinkStatus[] = ['удалено', 'деиндексировано google', 'деиндексировано yandex', 'деиндексировано bing', 'деиндексировано yahoo', 'принято', 'сдано'];
@@ -56,6 +57,15 @@ export default function ExecutorHistoryPage() {
   const totalEarnings = doneLinks.reduce((s, l) => s + l.executorCost, 0);
   const paidEarnings = doneLinks.filter((l) => l.executorPaid).reduce((s, l) => s + l.executorCost, 0);
   const pendingEarnings = totalEarnings - paidEarnings;
+  const totalEarningsByCurrency = groupAmountsByCurrency(
+    doneLinks.map((l) => ({ amount: l.executorCost, currency: projectsData.find((p) => p.id === l.projectId)?.currency }))
+  );
+  const paidEarningsByCurrency = groupAmountsByCurrency(
+    doneLinks.filter((l) => l.executorPaid).map((l) => ({ amount: l.executorCost, currency: projectsData.find((p) => p.id === l.projectId)?.currency }))
+  );
+  const pendingByCurrency = groupAmountsByCurrency(
+    doneLinks.filter((l) => !l.executorPaid).map((l) => ({ amount: l.executorCost, currency: projectsData.find((p) => p.id === l.projectId)?.currency }))
+  );
 
   const myPayments = crm.payments.filter((p) => p.type === 'выплата исполнителю');
 
@@ -80,9 +90,9 @@ export default function ExecutorHistoryPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { label: 'Всего выполнено', value: doneLinks.length, icon: 'ri-checkbox-circle-line', color: 'text-green-600', bg: 'bg-green-50' },
-            { label: 'Общий заработок', value: `${totalEarnings.toLocaleString('ru')} ₽`, icon: 'ri-coins-line', color: 'text-blue-900', bg: 'bg-slate-50' },
-            { label: 'Выплачено', value: `${paidEarnings.toLocaleString('ru')} ₽`, icon: 'ri-wallet-3-line', color: 'text-blue-600', bg: 'bg-blue-50' },
-            { label: 'Ожидает выплаты', value: `${pendingEarnings.toLocaleString('ru')} ₽`, icon: 'ri-time-line', color: 'text-orange-600', bg: 'bg-orange-50' },
+            { label: 'Общий заработок', value: formatGroupedAmounts(totalEarningsByCurrency), icon: 'ri-coins-line', color: 'text-blue-900', bg: 'bg-slate-50' },
+            { label: 'Выплачено', value: formatGroupedAmounts(paidEarningsByCurrency), icon: 'ri-wallet-3-line', color: 'text-blue-600', bg: 'bg-blue-50' },
+            { label: 'Ожидает выплаты', value: formatGroupedAmounts(pendingByCurrency), icon: 'ri-time-line', color: 'text-orange-600', bg: 'bg-orange-50' },
           ].map((k) => (
             <div key={k.label} className={`${k.bg} rounded-xl p-4 border border-gray-100`}>
               <div className="w-8 h-8 flex items-center justify-center rounded-lg bg-white mb-2">
@@ -266,7 +276,9 @@ export default function ExecutorHistoryPage() {
                       <td className="px-4 py-3"><StatusBadge status={link.status} type="link" /></td>
                       <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{(link.geo ? link.geo.split(',')[0] : '—')}</td>
                       <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{link.endDate || '—'}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-700 whitespace-nowrap text-sm">{link.executorCost.toLocaleString('ru')} ₽</td>
+                      <td className="px-4 py-3 text-right font-semibold text-gray-700 whitespace-nowrap text-sm">
+                        {formatMoney(link.executorCost, projectsData.find((p) => p.id === link.projectId)?.currency)}
+                      </td>
                       <td className="px-4 py-3">
                         {link.executorPaid ? (
                           <span className="inline-flex items-center gap-1 text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full whitespace-nowrap">
@@ -322,7 +334,7 @@ export default function ExecutorHistoryPage() {
                 {myPayments.map((payment) => (
                   <tr key={payment.id} className="hover:bg-gray-50/30 transition-colors">
                     <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{payment.date}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-800 whitespace-nowrap">{payment.amount.toLocaleString('ru')} ₽</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-800 whitespace-nowrap">{formatMoney(payment.amount, payment.currency)}</td>
                     <td className="px-4 py-3"><StatusBadge status={payment.status} type="payment" /></td>
                     <td className="px-4 py-3 text-sm text-gray-600">{payment.description}</td>
                   </tr>

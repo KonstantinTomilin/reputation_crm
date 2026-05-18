@@ -2,6 +2,7 @@ import { useState } from 'react';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
 import type { CRMLink } from '@/mocks/crm';
 import BulkAddLinksModal from './components/BulkAddLinksModal';
 import StartAuditModal from './components/StartAuditModal';
@@ -14,9 +15,9 @@ export default function AuditorTasksPage() {
   const [startModalOpen, setStartModalOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [bulkModalOpen, setBulkModalOpen] = useState(false);
-  const [tick, setTick] = useState(0);
   const crm = useCRM();
-  const [linksList, setLinksList] = useState<CRMLink[]>(crm.links);
+  const scope = useRoleScope();
+  const linksList = scope.links;
 
   // Комментарии для модалки просмотра
   const [newComment, setNewComment] = useState('');
@@ -50,38 +51,32 @@ export default function AuditorTasksPage() {
     if (activeLink) {
       const isRetake = activeLink.status === 'отклонено';
       const prefix = isRetake ? '[Аудитор повторно взял в работу]' : '[Аудитор начал работу]';
-      setLinksList((prev) =>
-        prev.map((l) =>
-          l.id === activeLink.id
-            ? {
-                ...l,
-                status: 'в аудите' as const,
-                startDate: new Date().toISOString().split('T')[0],
-                comments: comment.trim()
-                  ? [
-                      ...l.comments,
-                      {
-                        id: l.comments.length + 1,
-                        author: 'Козлов Д.',
-                        authorRole: 'auditor' as const,
-                        text: `${prefix}: ${comment.trim()}`,
-                        createdAt: new Date().toISOString().split('T')[0],
-                      },
-                    ]
-                  : [
-                      ...l.comments,
-                      {
-                        id: l.comments.length + 1,
-                        author: 'Козлов Д.',
-                        authorRole: 'auditor' as const,
-                        text: prefix,
-                        createdAt: new Date().toISOString().split('T')[0],
-                      },
-                    ],
-              }
-            : l
-        )
-      );
+      crm.updateLink({
+        ...activeLink,
+        status: 'в аудите',
+        startDate: new Date().toISOString().split('T')[0],
+        comments: comment.trim()
+          ? [
+              ...activeLink.comments,
+              {
+                id: activeLink.comments.length + 1,
+                author: 'Козлов Д.',
+                authorRole: 'auditor',
+                text: `${prefix}: ${comment.trim()}`,
+                createdAt: new Date().toISOString().split('T')[0],
+              },
+            ]
+          : [
+              ...activeLink.comments,
+              {
+                id: activeLink.comments.length + 1,
+                author: 'Козлов Д.',
+                authorRole: 'auditor',
+                text: prefix,
+                createdAt: new Date().toISOString().split('T')[0],
+              },
+            ],
+      });
       setStartModalOpen(false);
       setActiveLink(null);
     }
@@ -89,27 +84,21 @@ export default function AuditorTasksPage() {
 
   const handleSendToExecutor = () => {
     if (activeLink) {
-      setLinksList((prev) =>
-        prev.map((l) =>
-          l.id === activeLink.id
-            ? {
-                ...l,
-                status: 'на просчёт' as const,
-                endDate: new Date().toISOString().split('T')[0],
-                comments: [
-                  ...l.comments,
-                  {
-                    id: l.comments.length + 1,
-                    author: 'Козлов Д.',
-                    authorRole: 'auditor' as const,
-                    text: 'Аудитор собрал данные. Ссылка передана исполнителю на просчёт.',
-                    createdAt: new Date().toISOString().split('T')[0],
-                  },
-                ],
-              }
-            : l
-        )
-      );
+      crm.updateLink({
+        ...activeLink,
+        status: 'на просчёт',
+        endDate: new Date().toISOString().split('T')[0],
+        comments: [
+          ...activeLink.comments,
+          {
+            id: activeLink.comments.length + 1,
+            author: 'Козлов Д.',
+            authorRole: 'auditor',
+            text: 'Аудитор собрал данные. Ссылка передана исполнителю на просчёт.',
+            createdAt: new Date().toISOString().split('T')[0],
+          },
+        ],
+      });
       setViewModalOpen(false);
       setActiveLink(null);
     }
@@ -117,25 +106,19 @@ export default function AuditorTasksPage() {
 
   const handleAddComment = () => {
     if (activeLink && newComment.trim()) {
-      setLinksList((prev) =>
-        prev.map((l) =>
-          l.id === activeLink.id
-            ? {
-                ...l,
-                comments: [
-                  ...l.comments,
-                  {
-                    id: l.comments.length + 1,
-                    author: 'Козлов Д.',
-                    authorRole: 'auditor' as const,
-                    text: newComment.trim(),
-                    createdAt: new Date().toISOString().split('T')[0],
-                  },
-                ],
-              }
-            : l
-        )
-      );
+      crm.updateLink({
+        ...activeLink,
+        comments: [
+          ...activeLink.comments,
+          {
+            id: activeLink.comments.length + 1,
+            author: 'Козлов Д.',
+            authorRole: 'auditor',
+            text: newComment.trim(),
+            createdAt: new Date().toISOString().split('T')[0],
+          },
+        ],
+      });
       setNewComment('');
     }
   };
@@ -423,7 +406,7 @@ export default function AuditorTasksPage() {
       {bulkModalOpen && (
         <BulkAddLinksModal
           onClose={() => setBulkModalOpen(false)}
-          onAdded={() => setTick((t) => t + 1)}
+          onAdded={() => undefined}
         />
       )}
     </CRMLayout>

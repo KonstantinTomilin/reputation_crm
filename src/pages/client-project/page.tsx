@@ -4,23 +4,32 @@ import CRMLayout from '@/components/feature/CRMLayout';
 import ClientLinksTable from './components/ClientLinksTable';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
-import type { CRMLink } from '@/mocks/crm';
+import { useRoleScope } from '@/hooks/useRoleScope';
+import { defaultProjectDeadline } from '@/lib/dateUtils';
+import { formatMoney } from '@/lib/currency';
 
 const tabs = ['Ссылки', 'Аудит', 'Отчёты'];
 
 export default function ClientProjectPage() {
   const crm = useCRM();
+  const scope = useRoleScope();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('Ссылки');
-  const [links, setLinks] = useState<CRMLink[]>(crm.links);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [auditInput, setAuditInput] = useState('');
   const [auditSubmitted, setAuditSubmitted] = useState(false);
 
-  const project = crm.projects.find((p) => p.id === Number(id)) || crm.projects[0];
+  const project = scope.projects.find((p) => p.id === Number(id)) || scope.projects[0];
+  if (!project) {
+    return (
+      <CRMLayout role="client">
+        <div className="p-6 text-sm text-gray-500">Проект не найден или недоступен.</div>
+      </CRMLayout>
+    );
+  }
   const progress = Math.round(((project.removed) / project.totalLinks) * 100);
-  const projectLinks = crm.links.filter((l) => l.projectId === project.id);
+  const projectLinks = scope.links.filter((l) => l.projectId === project.id);
   const projectAudits = crm.audits.filter((a) => projectLinks.some((l) => l.id === a.linkId));
 
   const parseLinksFromText = (text: string): string[] => {
@@ -53,7 +62,7 @@ export default function ClientProjectPage() {
             addedDate: new Date().toISOString().split('T')[0],
             startDate: null,
             endDate: null,
-            deadline: null,
+            deadline: project.deadline || defaultProjectDeadline(),
             quarantineDays: 0,
             quarantineEndDate: null,
             executorId: null,
@@ -76,7 +85,19 @@ export default function ClientProjectPage() {
       return updated;
     });
 
-    setLinks(crm.links);
+    crm.users
+      .filter((u) => ['main_admin', 'admin', 'manager', 'leader'].includes(u.role))
+      .forEach((u) => {
+        crm.pushNotification({
+          userId: u.id,
+          role: 'management',
+          title: 'Ссылки отправлены на аудит',
+          message: `Клиент отправил ${urls.length} ссылок на аудит по проекту «${project.name}»`,
+          link: '/management/audits',
+          type: 'info',
+        });
+      });
+
     setAuditInput('');
     setShowAuditModal(false);
     setAuditSubmitted(true);
@@ -239,8 +260,8 @@ export default function ClientProjectPage() {
                             </td>
                             <td className="px-4 py-3 text-[13px] text-gray-600">{audit.removalDaysEstimate > 0 ? `${audit.removalDaysEstimate} дн.` : '—'}</td>
                             <td className="px-4 py-3 text-[13px] text-gray-600">{audit.deindexDaysEstimate > 0 ? `${audit.deindexDaysEstimate} дн.` : '—'}</td>
-                            <td className="px-4 py-3 text-[13px] text-gray-600 tabular-nums">{audit.costPerSE.google > 0 ? `${audit.costPerSE.google.toLocaleString('ru')} ₽` : '—'}</td>
-                            <td className="px-4 py-3 text-[13px] text-gray-600 tabular-nums">{audit.costPerSE.yandex > 0 ? `${audit.costPerSE.yandex.toLocaleString('ru')} ₽` : '—'}</td>
+                            <td className="px-4 py-3 text-[13px] text-gray-600 tabular-nums">{audit.costPerSE.google > 0 ? formatMoney(audit.costPerSE.google, project.currency) : '—'}</td>
+                            <td className="px-4 py-3 text-[13px] text-gray-600 tabular-nums">{audit.costPerSE.yandex > 0 ? formatMoney(audit.costPerSE.yandex, project.currency) : '—'}</td>
                             <td className="px-4 py-3">
                               <span className={`inline-flex items-center text-[11px] font-semibold px-2.5 py-1 rounded-md whitespace-nowrap ${
                                 audit.riskLevel === 'низкий' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100/60' :

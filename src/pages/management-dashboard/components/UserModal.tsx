@@ -17,6 +17,7 @@ export default function UserModal({ user, onClose, onSave }: UserModalProps) {
     alias: user?.alias || '',
     language: (user?.language || 'ru') as 'ru' | 'en',
     password: '',
+    linkedClientId: user?.linkedClientId ?? null,
   });
 
   return (
@@ -94,7 +95,19 @@ export default function UserModal({ user, onClose, onSave }: UserModalProps) {
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-slate-400"
                 placeholder="пароль"
-                type="text"
+                type="password"
+              />
+            </div>
+          )}
+          {form.role === 'client' && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">ID клиента (привязка данных)</label>
+              <input
+                type="number"
+                value={form.linkedClientId ?? ''}
+                onChange={(e) => setForm({ ...form, linkedClientId: e.target.value ? Number(e.target.value) : null })}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg"
+                placeholder="1"
               />
             </div>
           )}

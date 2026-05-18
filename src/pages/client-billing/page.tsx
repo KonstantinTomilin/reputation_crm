@@ -3,6 +3,8 @@ import html2pdf from 'html2pdf.js';
 import CRMLayout from '@/components/feature/CRMLayout';
 import type { CRMLink } from '@/mocks/crm';
 import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
+import { formatGroupedAmounts, formatMoney, groupAmountsByCurrency } from '@/lib/currency';
 
 const plans = [
   {
@@ -52,9 +54,12 @@ export default function ClientBillingPage() {
   const [receiptProject, setReceiptProject] = useState<string>('all');
 
   const crm = useCRM();
+  const scope = useRoleScope();
+  const scopedProjectIds = new Set(scope.projects.map((p) => p.id));
   const receipts = useMemo(() => {
     return crm.links
       .filter((l) => {
+        if (!scopedProjectIds.has(l.projectId)) return false;
         if (receiptProject !== 'all' && String(l.projectId) !== receiptProject) return false;
         if (receiptFilter === 'paid') return l.clientPaid === true;
         if (receiptFilter === 'unpaid') return l.clientPaid === false;
@@ -62,6 +67,8 @@ export default function ClientBillingPage() {
       })
       .map((l) => ({
         id: l.id,
+        projectId: l.projectId,
+        currency: crm.projects.find((p) => p.id === l.projectId)?.currency || 'RUB',
         url: l.url,
         projectName: crm.projects.find((p) => p.id === l.projectId)?.name || '—',
         status: l.status,
@@ -72,16 +79,20 @@ export default function ClientBillingPage() {
         paidDate: l.clientPaidDate,
         debt: l.clientPaid ? 0 : l.clientCost,
       }));
-  }, [crm, receiptFilter, receiptProject]);
+  }, [crm, scopedProjectIds, receiptFilter, receiptProject]);
 
   const totalDebt = receipts.reduce((s, r) => s + r.debt, 0);
   const totalPaid = receipts.filter((r) => r.paid).reduce((s, r) => s + r.paidAmount, 0);
   const totalCost = receipts.reduce((s, r) => s + r.cost, 0);
+  const totalDebtByCurrency = groupAmountsByCurrency(receipts.map((r) => ({ amount: r.debt, currency: r.currency })));
+  const totalPaidByCurrency = groupAmountsByCurrency(receipts.filter((r) => r.paid).map((r) => ({ amount: r.paidAmount, currency: r.currency })));
+  const totalCostByCurrency = groupAmountsByCurrency(receipts.map((r) => ({ amount: r.cost, currency: r.currency })));
 
   const downloadReceiptPDF = (linkId: number) => {
     const link = crm.links.find((l) => l.id === linkId);
     if (!link) return;
     const project = crm.projects.find((p) => p.id === link.projectId);
+    const currency = project?.currency || 'RUB';
     const isPaid = link.clientPaid;
     const amount = link.clientPaidAmount || link.clientCost;
 
@@ -140,7 +151,7 @@ export default function ClientBillingPage() {
         <div class="field-value">${link.clientPaidDate || formatDate(new Date())}</div>
       </div>
       <div class="total">
-        <div class="total-amount">${amount.toLocaleString('ru')} ₽</div>
+        <div class="total-amount">${formatMoney(amount, currency)}</div>
         <div class="total-label">${isPaid ? 'Сумма оплаты' : 'Сумма к оплате'}</div>
       </div>
       <div class="footer">
@@ -260,19 +271,19 @@ export default function ClientBillingPage() {
             <td>1</td>
             <td>Услуги по управлению репутацией — период ${invoice.period}</td>
             <td class="num">1</td>
-            <td class="num">${invoice.amount.toLocaleString('ru')} ₽</td>
-            <td class="num">${invoice.amount.toLocaleString('ru')} ₽</td>
+            <td class="num">${formatMoney(invoice.amount, 'RUB')}</td>
+            <td class="num">${formatMoney(invoice.amount, 'RUB')}</td>
           </tr>
         </tbody>
       </table>
       <div class="totals">
-        <div class="totals-row"><span>Итого:</span><span>${invoice.amount.toLocaleString('ru')} ₽</span></div>
-        <div class="totals-row"><span>Без налога (НДС):</span><span>0 ₽</span></div>
-        <div class="totals-row grand"><span>Всего к оплате:</span><span>${invoice.amount.toLocaleString('ru')} ₽</span></div>
+        <div class="totals-row"><span>Итого:</span><span>${formatMoney(invoice.amount, 'RUB')}</span></div>
+        <div class="totals-row"><span>Без налога (НДС):</span><span>${formatMoney(0, 'RUB')}</span></div>
+        <div class="totals-row grand"><span>Всего к оплате:</span><span>${formatMoney(invoice.amount, 'RUB')}</span></div>
       </div>
       <div class="stamp">${invoice.status === 'оплачен' ? 'ОПЛАЧЕНО' : ''}</div>
       <div style="font-size:12px;color:#444;margin-bottom:20px">
-        <strong>Всего к оплате:</strong> ${invoice.amount.toLocaleString('ru')} рублей 00 копеек
+        <strong>Всего к оплате:</strong> ${formatMoney(invoice.amount, 'RUB')}
       </div>
       <div class="footer">
         Счёт сформирован автоматически в deindex.ru CRM<br>
@@ -338,7 +349,7 @@ export default function ClientBillingPage() {
                   <div className="bg-white/20 px-3 py-1 rounded-full text-xs font-semibold">Активен</div>
                 </div>
                 <div className="flex items-baseline gap-1 mb-6">
-                  <span className="text-3xl font-bold">29 900 ₽</span>
+                  <span className="text-3xl font-bold">{formatMoney(29900, 'RUB')}</span>
                   <span className="text-slate-200 text-sm">/ месяц</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -383,20 +394,20 @@ export default function ClientBillingPage() {
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-500">Оплачено за ссылки</span>
-                    <span className="text-sm font-bold text-green-600">{totalPaid.toLocaleString('ru')} ₽</span>
+                    <span className="text-sm font-bold text-green-600">{formatGroupedAmounts(totalPaidByCurrency)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-500">Задолженность</span>
-                    <span className="text-sm font-bold text-red-500">{totalDebt.toLocaleString('ru')} ₽</span>
+                    <span className="text-sm font-bold text-red-500">{formatGroupedAmounts(totalDebtByCurrency)}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-500">Всего на счету</span>
-                    <span className="text-sm font-bold text-gray-800">{totalCost.toLocaleString('ru')} ₽</span>
+                    <span className="text-sm font-bold text-gray-800">{formatGroupedAmounts(totalCostByCurrency)}</span>
                   </div>
                   <div className="h-px bg-gray-100 my-1" />
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-500">Тариф</span>
-                    <span className="text-sm font-bold text-gray-800">29 900 ₽/мес</span>
+                    <span className="text-sm font-bold text-gray-800">{`${formatMoney(29900, 'RUB')}/мес`}</span>
                   </div>
                 </div>
               </div>
@@ -409,7 +420,7 @@ export default function ClientBillingPage() {
                     <div className="text-xs text-gray-400 mt-0.5">{mockInvoices[0].period}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-bold text-gray-800">{mockInvoices[0].amount.toLocaleString('ru')} ₽</div>
+                    <div className="font-bold text-gray-800">{formatMoney(mockInvoices[0].amount, 'RUB')}</div>
                     <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">{mockInvoices[0].status}</span>
                   </div>
                 </div>
@@ -450,7 +461,7 @@ export default function ClientBillingPage() {
                       <td className="px-5 py-3.5 font-mono text-xs text-gray-600">{inv.id}</td>
                       <td className="px-5 py-3.5 text-gray-700 font-medium">{inv.period}</td>
                       <td className="px-5 py-3.5 text-gray-500 text-xs">{inv.date}</td>
-                      <td className="px-5 py-3.5 text-right font-bold text-gray-800">{inv.amount.toLocaleString('ru-RU')} ₽</td>
+                      <td className="px-5 py-3.5 text-right font-bold text-gray-800">{formatMoney(inv.amount, 'RUB')}</td>
                       <td className="px-5 py-3.5 text-center">
                         <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">{inv.status}</span>
                       </td>
@@ -490,7 +501,7 @@ export default function ClientBillingPage() {
                 <div className="text-xs text-gray-400 mt-0.5">Не оплачено</div>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="text-2xl font-bold text-blue-900">{totalDebt.toLocaleString('ru')} ₽</div>
+                <div className="text-2xl font-bold text-blue-900">{formatGroupedAmounts(totalDebtByCurrency)}</div>
                 <div className="text-xs text-gray-400 mt-0.5">Задолженность</div>
               </div>
             </div>
@@ -516,7 +527,7 @@ export default function ClientBillingPage() {
                 className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-slate-400 bg-white cursor-pointer"
               >
                 <option value="all">Все проекты</option>
-                {crm.projects.map((p) => (
+              {scope.projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
@@ -546,7 +557,7 @@ export default function ClientBillingPage() {
                           <span className="truncate text-blue-900 text-xs block" title={r.url}>{r.url}</span>
                         </td>
                         <td className="px-5 py-3.5 text-xs text-gray-600">{r.type}</td>
-                        <td className="px-5 py-3.5 text-right font-bold text-gray-800">{r.cost.toLocaleString('ru')} ₽</td>
+                        <td className="px-5 py-3.5 text-right font-bold text-gray-800">{formatMoney(r.cost, r.currency)}</td>
                         <td className="px-5 py-3.5 text-center">
                           {r.paid ? (
                             <div className="flex flex-col items-center">
@@ -606,7 +617,7 @@ export default function ClientBillingPage() {
                 <div className="mb-4">
                   <div className="text-lg font-bold text-gray-800">{plan.name}</div>
                   <div className="flex items-baseline gap-1 mt-2">
-                    <span className="text-3xl font-bold text-gray-800">{plan.price.toLocaleString('ru-RU')} ₽</span>
+                    <span className="text-3xl font-bold text-gray-800">{formatMoney(plan.price, 'RUB')}</span>
                     <span className="text-gray-400 text-sm">/ {plan.period}</span>
                   </div>
                 </div>

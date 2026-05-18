@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import CRMLayout from '@/components/feature/CRMLayout';
 import StatusBadge from '@/components/base/StatusBadge';
 import { useCRM } from '@/context/CRMContext';
+import { useRoleScope } from '@/hooks/useRoleScope';
+import { formatMoney } from '@/lib/currency';
 import type { LinkStatus, CRMLink } from '@/mocks/crm';
+import { setClientPaymentStatus } from '@/lib/linkFinance';
 
 const statusOptions: LinkStatus[] = [
   'в работе', 'в карантине', 'готово', 'сдано', 'отклонено', 'удалено',
@@ -23,8 +26,9 @@ function getPaymentDisplay(link: CRMLink): PaymentStatusDisplay {
 
 export default function ClientLinksPage() {
   const crm = useCRM();
+  const scope = useRoleScope();
   const navigate = useNavigate();
-  const [links, setLinks] = useState<CRMLink[]>(crm.links);
+  const links = scope.links;
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<LinkStatus | 'all'>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -98,18 +102,11 @@ export default function ClientLinksPage() {
   const getProjectName = (projectId: number) => crm.projects.find((p) => p.id === projectId)?.name || '—';
 
   const updatePaymentStatus = (linkId: number, status: PaymentStatusDisplay) => {
-    setLinks((prev) =>
-      prev.map((l) => {
-        if (l.id !== linkId) return l;
-        if (status === 'оплачено') {
-          return { ...l, clientPaid: true, clientPaidDate: formatDate(new Date()), clientPaidAmount: l.clientCost };
-        } else if (status === 'не оплачено') {
-          return { ...l, clientPaid: false, clientPaidDate: null, clientPaidAmount: null };
-        } else {
-          return { ...l, clientPaid: true, clientPaidDate: formatDate(new Date()), clientPaidAmount: Math.round(l.clientCost * 0.5) };
-        }
-      })
-    );
+    const link = links.find((l) => l.id === linkId);
+    if (!link) return;
+    if (status === 'оплачено') crm.updateLink(setClientPaymentStatus(link, 'paid'));
+    else if (status === 'не оплачено') crm.updateLink(setClientPaymentStatus(link, 'unpaid'));
+    else crm.updateLink(setClientPaymentStatus(link, 'partially_paid', Math.round(link.clientCost * 0.5)));
   };
 
   return (
@@ -317,7 +314,7 @@ export default function ClientLinksPage() {
                         <StatusBadge status={link.status} type="link" />
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-700 whitespace-nowrap">
-                        {link.clientCost.toLocaleString('ru-RU')} ₽
+                        {formatMoney(link.clientCost, crm.projects.find((p) => p.id === link.projectId)?.currency)}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {payDisplay === 'оплачено' ? (
@@ -328,7 +325,7 @@ export default function ClientLinksPage() {
                         ) : payDisplay === 'предоплата' ? (
                           <div className="flex flex-col items-center">
                             <span className="text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full whitespace-nowrap">
-                              Предоплата {(link.clientPaidAmount || 0).toLocaleString('ru')} ₽
+                              Предоплата {formatMoney(link.clientPaidAmount || 0, crm.projects.find((p) => p.id === link.projectId)?.currency)}
                             </span>
                           </div>
                         ) : (
