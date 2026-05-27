@@ -300,6 +300,19 @@ function normalizeToIsoDateTime(input: string | null | undefined): string | null
   return `${input}T00:00:00.000Z`;
 }
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: unknown): boolean {
+  return typeof value === 'string' && UUID_REGEX.test(value);
+}
+
+export function omitInvalidUuidId<T extends { id?: string }>(row: T): T {
+  if (!row.id || isUuid(row.id)) return row;
+  const { id: _invalidId, ...rest } = row;
+  return rest as T;
+}
+
 export function legacyIdToUuid(entity: string, id: number): string {
   const entityHex = Array.from(entity)
     .map((ch) => ch.charCodeAt(0).toString(16).padStart(2, '0'))
@@ -344,7 +357,7 @@ export function mapUserToDbInsert(input: Omit<CRMUser, 'id'>, legacyId?: number)
   const deleted = Boolean(input.isDeleted);
   const blocked = input.status === 'заблокирован';
   const status: DbUserStatus = deleted ? 'deleted' : blocked ? 'blocked' : 'active';
-  return {
+  return omitInvalidUuidId({
     id: typeof legacyId === 'number' ? legacyIdToUuid('users', legacyId) : undefined,
     login: input.login,
     password_hash: null,
@@ -355,7 +368,7 @@ export function mapUserToDbInsert(input: Omit<CRMUser, 'id'>, legacyId?: number)
     phone: null,
     notes: null,
     deleted_at: deleted ? new Date().toISOString() : null,
-  };
+  });
 }
 
 export function mapDbClientToClient(row: DbClientRow): CRMClient {
@@ -371,7 +384,7 @@ export function mapDbClientToClient(row: DbClientRow): CRMClient {
 }
 
 export function mapClientToDbInsert(input: Omit<CRMClient, 'id'>, legacyId?: number): DbClientInsert {
-  return {
+  return omitInvalidUuidId({
     id: typeof legacyId === 'number' ? legacyIdToUuid('clients', legacyId) : undefined,
     user_id: null,
     name: input.companyName,
@@ -380,7 +393,7 @@ export function mapClientToDbInsert(input: Omit<CRMClient, 'id'>, legacyId?: num
     phone: null,
     notes: null,
     deleted_at: input.isDeleted ? new Date().toISOString() : null,
-  };
+  });
 }
 
 export function mapDbProjectToProject(row: DbProjectRow): CRMProject {
@@ -412,7 +425,7 @@ export function mapProjectToDbInsert(
   refs: { clientUuid: string | null }
 ): DbProjectInsert {
   const createdAt = normalizeToIsoDateTime(project.startDate) ?? new Date().toISOString();
-  return {
+  return omitInvalidUuidId({
     id: legacyIdToUuid('projects', project.id),
     client_id: refs.clientUuid ?? legacyIdToUuid('clients', project.clientId),
     title: project.name,
@@ -422,7 +435,7 @@ export function mapProjectToDbInsert(
     deadline_at: normalizeToIsoDateTime(project.deadline ?? defaultProjectDeadline(project.startDate)),
     created_at: createdAt,
     deleted_at: project.isDeleted ? new Date().toISOString() : null,
-  };
+  });
 }
 
 export function mapDbLinkToLink(
@@ -479,7 +492,7 @@ export function mapLinkToDbInsert(
   const clientPaymentStatus = clientPaymentFromLegacy(link);
   const executorPaymentStatus = executorPaymentFromLegacy(link);
   const currency = normalizeCurrency(link.geo ?? refs.projectCurrency ?? 'RUB');
-  return {
+  return omitInvalidUuidId({
     id: legacyIdToUuid('links', link.id),
     project_id: refs.projectUuid,
     client_id: refs.clientUuid,
@@ -497,7 +510,7 @@ export function mapLinkToDbInsert(
     notes: link.comments.map((c) => `${c.author}: ${c.text}`).join('\n').slice(0, 2000) || null,
     created_at: normalizeToIsoDateTime(link.addedDate) ?? new Date().toISOString(),
     deleted_at: link.isDeleted ? new Date().toISOString() : null,
-  };
+  });
 }
 
 export function mapDbAuditToAudit(row: DbAuditRow): CRMAudit {
@@ -531,7 +544,7 @@ export function mapAuditToDbInsert(
     auditorUuid: string | null;
   }
 ): DbAuditInsert {
-  return {
+  return omitInvalidUuidId({
     id: legacyIdToUuid('audits', audit.id),
     project_id: refs.projectUuid,
     link_id: refs.linkUuid,
@@ -547,7 +560,7 @@ export function mapAuditToDbInsert(
     created_at: normalizeToIsoDateTime(audit.auditDate) ?? new Date().toISOString(),
     completed_at: null,
     deleted_at: null,
-  };
+  });
 }
 
 export function mapDbNotificationToNotification(row: DbNotificationRow): CRMNotification {
@@ -568,8 +581,8 @@ export function mapNotificationToDbInsert(
   notification: CRMNotification,
   refs: { userUuid: string | null }
 ): DbNotificationInsert {
-  return {
-    id: notification.id || legacyIdToUuid('notifications', Number(Date.now())),
+  return omitInvalidUuidId({
+    id: notification.id || undefined,
     user_id: refs.userUuid ?? legacyIdToUuid('users', notification.userId),
     type: notification.type,
     title: notification.title,
@@ -578,7 +591,7 @@ export function mapNotificationToDbInsert(
     entity_id: null,
     is_read: notification.read,
     created_at: normalizeToIsoDateTime(notification.createdAt) ?? new Date().toISOString(),
-  };
+  });
 }
 
 export function mapDbFinancialOperationToPayment(row: DbFinancialOperationRow): CRMPayment {
@@ -603,7 +616,7 @@ export function mapPaymentToDbFinancialOperationInsert(payment: CRMPayment): DbF
       : payment.status === 'оплачен'
         ? 'client_payment'
         : 'client_invoice';
-  return {
+  return omitInvalidUuidId({
     id: legacyIdToUuid('payments', payment.id),
     project_id: payment.projectId ? legacyIdToUuid('projects', payment.projectId) : null,
     link_id: payment.linkId ? legacyIdToUuid('links', payment.linkId) : null,
@@ -616,7 +629,7 @@ export function mapPaymentToDbFinancialOperationInsert(payment: CRMPayment): DbF
     notes: payment.description || null,
     created_at: normalizeToIsoDateTime(payment.date) ?? new Date().toISOString(),
     deleted_at: null,
-  };
+  });
 }
 
 export function mapDbSettingsToSettings(rows: DbSettingRow[]): CRMSettings {

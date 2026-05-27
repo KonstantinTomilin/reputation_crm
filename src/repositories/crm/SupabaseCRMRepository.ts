@@ -31,6 +31,7 @@ import {
   mapProjectToDbInsert,
   mapSettingsToDbInsert,
   mapUserToDbInsert,
+  isUuid,
   uuidToLegacyNumericId,
   type DbAuditRow,
   type DbClientRow,
@@ -242,8 +243,17 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
         const payload = mapNotificationToDbInsert(entity, {
           userUuid: userUuidByLegacyId.get(entity.userId) ?? legacyIdToUuid('users', entity.userId),
         });
-        const { error } = await client.from('crm_notifications').upsert(payload, { onConflict: 'id' });
-        if (error) throw new Error(`Failed to save notification ${entity.id}: ${error.message}`);
+        const stableId = payload.id ?? this.deriveStableNotificationUuid(entity.id);
+        const normalizedPayload = stableId ? { ...payload, id: stableId } : payload;
+        const query = normalizedPayload.id
+          ? client.from('crm_notifications').upsert(normalizedPayload, { onConflict: 'id' })
+          : client.from('crm_notifications').insert(normalizedPayload);
+        const { error } = await query;
+        if (error) {
+          throw new Error(
+            `Failed to save notification ${entity.id}: ${this.formatSupabaseErrorMessage(error, 'save notification')}`
+          );
+        }
       })
     );
 
@@ -646,7 +656,16 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
     if (!client) throw new Error('Supabase env is not configured.');
     const payload = mapNotificationToDbInsert(input, { userUuid: legacyIdToUuid('users', input.userId) });
     const { data, error } = await client.from('crm_notifications').insert(payload).select('*').single();
-    if (error) throw new Error(error.message);
+    if (error && this.isInvalidUuidInputError(error)) {
+      const safePayload = { ...payload };
+      delete safePayload.id;
+      const fallbackResult = await client.from('crm_notifications').insert(safePayload).select('*').single();
+      if (fallbackResult.error) {
+        throw new Error(this.formatSupabaseErrorMessage(fallbackResult.error, 'create notification'));
+      }
+      return mapDbNotificationToNotification(fallbackResult.data as DbNotificationRow);
+    }
+    if (error) throw new Error(this.formatSupabaseErrorMessage(error, 'create notification'));
     return mapDbNotificationToNotification(data as DbNotificationRow);
   }
 
@@ -884,6 +903,29 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
     }
 
     return inserted as DbUserRow;
+  }
+
+  private deriveStableNotificationUuid(notificationId: string): string | undefined {
+    if (isUuid(notificationId)) return notificationId;
+    const numericPart = Number.parseInt(notificationId.replace(/\D/g, ''), 10);
+    if (!Number.isFinite(numericPart)) return undefined;
+    return legacyIdToUuid('notifications', numericPart);
+  }
+
+  private isInvalidUuidInputError(error: { message?: string; code?: string } | null): boolean {
+    if (!error) return false;
+    return error.code === '22P02' || /invalid input syntax for type uuid/i.test(error.message ?? '');
+  }
+
+  private formatSupabaseErrorMessage(
+    error: { message?: string; code?: string } | null,
+    action: string
+  ): string {
+    if (!error) return `Failed to ${action}.`;
+    if (this.isInvalidUuidInputError(error)) {
+      return `${error.message ?? 'Invalid UUID in payload.'} (code: ${error.code ?? '22P02'})`;
+    }
+    return error.message ?? `Failed to ${action}.`;
   }
 }
 
