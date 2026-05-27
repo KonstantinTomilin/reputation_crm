@@ -10,3 +10,4 @@ export interface CRMRepository {
   clearSession(): void;
 }
 
+// TODO(Stage 2.3): move repository contract to async-first API for backend mode.

@@ -28,7 +28,16 @@ import type { CRMUser, CRMClient, CRMLink, LinkStatus, CRMProject, ProjectStatus
 import { defaultProjectDeadline } from '@/lib/dateUtils';
 import { formatGroupedAmounts, formatMoney, getCurrencySymbol, groupAmountsByCurrency } from '@/lib/currency';
 import { COMPLETED_WORK_STATUSES, setClientPaymentStatus, setExecutorPaymentStatus } from '@/lib/linkFinance';
+import { getSessionUser } from '@/lib/auth';
 import { IS_PRODUCTION_UI } from '@/context/CRMContext';
+import { testSupabaseConnection } from '@/lib/supabase';
+import { exportLocalStorageSnapshot } from '@/repositories/crm/localStorageExport';
+import {
+  dryRunImportLocalStorageToSupabase,
+  importLocalStorageToSupabase,
+  validateSupabaseDataIntegrity,
+  validateSupabaseImportResult,
+} from '@/repositories/crm/importLocalStorageToSupabase';
 
 const validTabs = [
   'overview', 'users', 'projects', 'links', 'audits', 'auditors',
@@ -145,8 +154,26 @@ export default function ManagementDashboardPage() {
 
   // Integrity check modal
   const [integrityModal, setIntegrityModal] = useState<{ open: boolean; issues: ReturnType<typeof crm.checkIntegrity> }>({ open: false, issues: [] });
+  const [migrationPanelOpen, setMigrationPanelOpen] = useState(false);
+  const [migrationBusy, setMigrationBusy] = useState(false);
+  const [migrationConfirmText, setMigrationConfirmText] = useState('');
+  const [migrationError, setMigrationError] = useState<string | null>(null);
+  const [lastMigrationResult, setLastMigrationResult] = useState<{
+    title: string;
+    summary: string;
+    success: boolean;
+    warnings: string[];
+    errors: string[];
+    counts?: Record<string, number>;
+    raw: unknown;
+  } | null>(null);
 
   const switchTab = (t: string) => navigate(`/management/${t}`);
+  const sessionUser = useMemo(() => getSessionUser(), []);
+  const isMainAdmin = sessionUser?.role === 'main_admin';
+  const currentDataMode = import.meta.env.VITE_CRM_DATA_MODE ?? 'localStorage';
+  const hasSupabaseUrl = Boolean(import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_PUBLIC_SUPABASE_URL);
+  const hasSupabaseAnon = Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_PUBLIC_SUPABASE_ANON_KEY);
 
   const filteredUsers = useMemo(() => {
     return usersList.filter((u) => {
@@ -2126,6 +2153,43 @@ export default function ManagementDashboardPage() {
     </div>
   );
 
+  const runMigrationAction = async (title: string, action: () => Promise<{
+    summary: string;
+    success: boolean;
+    warnings?: string[];
+    errors?: string[];
+    counts?: Record<string, number>;
+    raw: unknown;
+  }>) => {
+    setMigrationBusy(true);
+    setMigrationError(null);
+    try {
+      const result = await action();
+      setLastMigrationResult({
+        title,
+        summary: result.summary,
+        success: result.success,
+        warnings: result.warnings ?? [],
+        errors: result.errors ?? [],
+        counts: result.counts,
+        raw: result.raw,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Неизвестная ошибка операции';
+      setMigrationError(message);
+      setLastMigrationResult({
+        title,
+        summary: message,
+        success: false,
+        warnings: [],
+        errors: [message],
+        raw: { error: message },
+      });
+    } finally {
+      setMigrationBusy(false);
+    }
+  };
+
   const renderSettings = () => (
     <div className="flex flex-col gap-5">
       {/* System Tools */}
@@ -2158,7 +2222,235 @@ export default function ManagementDashboardPage() {
             </div>
           </button>
           )}
+          {isMainAdmin && (
+            <button
+              onClick={() => setMigrationPanelOpen((prev) => !prev)}
+              className={`flex items-center gap-3 p-4 rounded-xl transition-colors cursor-pointer text-left ${
+                migrationPanelOpen ? 'bg-blue-50 hover:bg-blue-100' : 'bg-slate-50 hover:bg-slate-100'
+              }`}
+            >
+              <div className={`w-10 h-10 flex items-center justify-center rounded-lg flex-shrink-0 ${migrationPanelOpen ? 'bg-blue-100' : 'bg-slate-100'}`}>
+                <i className="ri-database-2-line text-blue-900 text-lg" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-gray-800">Миграция в Supabase</div>
+                <div className="text-xs text-gray-500">
+                  Проверка подключения, dry-run, импорт localStorage → Supabase и валидация данных
+                </div>
+              </div>
+              <i className={`ri-arrow-${migrationPanelOpen ? 'up' : 'down'}-s-line text-gray-500`} />
+            </button>
+          )}
         </div>
+        {isMainAdmin && migrationPanelOpen && (
+          <div className="mt-4 p-4 border border-blue-100 rounded-xl bg-blue-50/40 flex flex-col gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="p-3 rounded-lg bg-white border border-slate-200">
+                <div className="text-xs font-semibold text-gray-600 mb-1">Current data mode</div>
+                <div className="text-sm font-bold text-gray-800">{currentDataMode}</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Основной режим сейчас localStorage. Панель не переключает режим автоматически.
+                </div>
+              </div>
+              <div className="p-3 rounded-lg bg-white border border-slate-200">
+                <div className="text-xs font-semibold text-gray-600 mb-1">Supabase env status</div>
+                <div className="text-sm text-gray-700">VITE_SUPABASE_URL: <span className={hasSupabaseUrl ? 'text-emerald-600 font-semibold' : 'text-red-600 font-semibold'}>{hasSupabaseUrl ? 'задан' : 'не задан'}</span></div>
+                <div className="text-sm text-gray-700">VITE_SUPABASE_ANON_KEY: <span className={hasSupabaseAnon ? 'text-emerald-600 font-semibold' : 'text-red-600 font-semibold'}>{hasSupabaseAnon ? 'задан' : 'не задан'}</span></div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              <button
+                disabled={migrationBusy}
+                onClick={() => runMigrationAction('Check Supabase connection', async () => {
+                  const result = await testSupabaseConnection();
+                  return {
+                    summary: result.message,
+                    success: result.ok,
+                    warnings: result.ok ? [] : [result.message],
+                    errors: result.ok ? [] : [result.message],
+                    raw: result,
+                  };
+                })}
+                className="px-3 py-2.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed text-left"
+              >
+                Check Supabase connection
+              </button>
+
+              <button
+                disabled={migrationBusy}
+                onClick={() => runMigrationAction('Read localStorage snapshot', async () => {
+                  const result = exportLocalStorageSnapshot();
+                  const counts = {
+                    users: result.snapshot.users.length,
+                    clients: result.snapshot.clients.length,
+                    projects: result.snapshot.projects.length,
+                    links: result.snapshot.links.length,
+                    audits: result.snapshot.audits.length,
+                    payments: result.snapshot.payments.length,
+                    notifications: result.snapshot.notifications.length,
+                    settings: Object.keys(result.snapshot.settings ?? {}).length,
+                  };
+                  return {
+                    summary: 'Snapshot прочитан из localStorage.',
+                    success: result.validation.valid,
+                    warnings: result.validation.warnings,
+                    errors: result.validation.errors,
+                    counts,
+                    raw: result,
+                  };
+                })}
+                className="px-3 py-2.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed text-left"
+              >
+                Read localStorage snapshot
+              </button>
+
+              <button
+                disabled={migrationBusy}
+                onClick={() => runMigrationAction('Run dry-run', async () => {
+                  const report = await dryRunImportLocalStorageToSupabase({
+                    skipExisting: true,
+                    overwriteExisting: false,
+                    importDeleted: true,
+                    importNotifications: true,
+                    importSettings: true,
+                  });
+                  const verdict = validateSupabaseImportResult(report);
+                  return {
+                    summary: verdict.pass ? 'Dry-run завершен успешно.' : 'Dry-run завершен с ошибками.',
+                    success: verdict.pass,
+                    warnings: verdict.warnings,
+                    errors: verdict.errors,
+                    counts: {
+                      users: report.found.users,
+                      clients: report.found.clients,
+                      projects: report.found.projects,
+                      links: report.found.links,
+                      audits: report.found.audits,
+                      notifications: report.found.notifications,
+                      financialOperations: report.found.financialOperations,
+                      settings: report.found.settings,
+                    },
+                    raw: report,
+                  };
+                })}
+                className="px-3 py-2.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed text-left"
+              >
+                Run dry-run
+              </button>
+            </div>
+
+            <div className="p-3 rounded-lg bg-white border border-slate-200">
+              <div className="text-xs font-semibold text-gray-600 mb-2">Import to Supabase</div>
+              <div className="flex flex-col md:flex-row gap-2">
+                <input
+                  value={migrationConfirmText}
+                  onChange={(e) => setMigrationConfirmText(e.target.value)}
+                  placeholder="Введите IMPORT_LOCALSTORAGE_TO_SUPABASE"
+                  className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-blue-400"
+                />
+                <button
+                  disabled={migrationBusy || migrationConfirmText !== 'IMPORT_LOCALSTORAGE_TO_SUPABASE'}
+                  onClick={() => runMigrationAction('Import to Supabase', async () => {
+                    const report = await importLocalStorageToSupabase({
+                      confirm: migrationConfirmText,
+                      dryRun: false,
+                      skipExisting: true,
+                      overwriteExisting: false,
+                      importDeleted: true,
+                      importNotifications: true,
+                      importSettings: true,
+                    });
+                    const verdict = validateSupabaseImportResult(report);
+                    return {
+                      summary: verdict.pass ? 'Импорт завершен.' : 'Импорт завершен с ошибками.',
+                      success: verdict.pass,
+                      warnings: verdict.warnings,
+                      errors: verdict.errors,
+                      counts: {
+                        users: report.imported.users,
+                        clients: report.imported.clients,
+                        projects: report.imported.projects,
+                        links: report.imported.links,
+                        audits: report.imported.audits,
+                        notifications: report.imported.notifications,
+                        financialOperations: report.imported.financialOperations,
+                        settings: report.imported.settings,
+                      },
+                      raw: report,
+                    };
+                  })}
+                  className="px-4 py-2 text-sm rounded-lg bg-blue-900 text-white hover:bg-blue-800 disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  Import to Supabase
+                </button>
+                <button
+                  disabled={migrationBusy}
+                  onClick={() => runMigrationAction('Validate Supabase data', async () => {
+                    const result = await validateSupabaseDataIntegrity();
+                    return {
+                      summary: result.pass ? 'Проверка Supabase пройдена.' : 'Проверка Supabase выявила проблемы.',
+                      success: result.pass,
+                      warnings: result.warnings,
+                      errors: result.errors,
+                      counts: result.counts,
+                      raw: result,
+                    };
+                  })}
+                  className="px-4 py-2 text-sm rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  Validate Supabase data
+                </button>
+              </div>
+              <div className="text-[11px] text-gray-500 mt-2">
+                Импорт выполняется вручную, localStorage не очищается, режим CRM не переключается.
+              </div>
+            </div>
+
+            {(migrationBusy || migrationError || lastMigrationResult) && (
+              <div className="p-3 rounded-lg bg-white border border-slate-200">
+                <div className="text-xs font-semibold text-gray-600 mb-2">Last operation result</div>
+                {migrationBusy && (
+                  <div className="text-sm text-blue-700 flex items-center gap-2">
+                    <i className="ri-loader-4-line animate-spin" />
+                    Выполняется операция...
+                  </div>
+                )}
+                {migrationError && (
+                  <div className="text-sm text-red-600 mb-2">{migrationError}</div>
+                )}
+                {lastMigrationResult && (
+                  <div className="flex flex-col gap-2">
+                    <div className={`text-sm font-semibold ${lastMigrationResult.success ? 'text-emerald-700' : 'text-amber-700'}`}>
+                      {lastMigrationResult.title}: {lastMigrationResult.summary}
+                    </div>
+                    {lastMigrationResult.counts && (
+                      <div className="text-xs text-gray-600">
+                        {Object.entries(lastMigrationResult.counts).map(([key, value]) => `${key}: ${value}`).join(' · ')}
+                      </div>
+                    )}
+                    {lastMigrationResult.warnings.length > 0 && (
+                      <div className="text-xs text-amber-700">
+                        warnings: {lastMigrationResult.warnings.length}
+                      </div>
+                    )}
+                    {lastMigrationResult.errors.length > 0 && (
+                      <div className="text-xs text-red-700">
+                        errors: {lastMigrationResult.errors.length}
+                      </div>
+                    )}
+                    <details className="mt-1">
+                      <summary className="text-xs text-blue-900 cursor-pointer">Raw JSON</summary>
+                      <pre className="mt-2 p-2 rounded bg-slate-100 text-[11px] text-gray-700 overflow-auto max-h-64 whitespace-pre-wrap">
+                        {JSON.stringify(lastMigrationResult.raw, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-5">
