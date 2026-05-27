@@ -58,6 +58,10 @@ export class LocalStorageCRMRepository implements CRMRepository {
     sessionUser: 'crm_user',
   } as const;
 
+  getDataMode(): 'localStorage' {
+    return 'localStorage';
+  }
+
   loadSnapshot(): CRMSnapshot {
     const users = ensureDefaultExecutors(loadFromStorage(this.storageKeys.users, initialUsers));
     const authFromUsers: AuthUser[] = users.map((u) => ({
@@ -107,6 +111,14 @@ export class LocalStorageCRMRepository implements CRMRepository {
     localStorage.setItem(this.storageKeys.authUsers, JSON.stringify(snapshot.authUsers));
     localStorage.setItem(this.storageKeys.notifications, JSON.stringify(snapshot.notifications));
     localStorage.setItem(this.storageKeys.settings, JSON.stringify(snapshot.settings));
+  }
+
+  async loadSnapshotAsync(): Promise<CRMSnapshot> {
+    return this.loadSnapshot();
+  }
+
+  async saveSnapshotAsync(snapshot: CRMSnapshot): Promise<void> {
+    this.saveSnapshot(snapshot);
   }
 
   clearEntityData(): void {

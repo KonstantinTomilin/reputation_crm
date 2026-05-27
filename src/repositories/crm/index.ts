@@ -19,13 +19,9 @@ function resolveDataMode(): CRMDataMode {
 
 export function createCRMRepository(): CRMRepository {
   const mode = resolveDataMode();
-  if (mode === 'backend') {
-    console.warn('[CRM] Backend repository is not implemented yet. Falling back to localStorage mode.');
-    return new LocalStorageCRMRepository();
-  }
-  if (mode === 'supabase') {
+  if (mode === 'supabase' || mode === 'backend') {
     console.warn(
-      '[CRM] Supabase mode is experimental in Stage 2.3. Core CRM data flow still uses localStorage-compatible snapshot methods.'
+      '[CRM] Supabase primary mode enabled. backend is treated as supabase alias in Stage 2.4.'
     );
     return new SupabaseCRMRepository();
   }

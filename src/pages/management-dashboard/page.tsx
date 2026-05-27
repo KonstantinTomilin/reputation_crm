@@ -2249,8 +2249,13 @@ export default function ManagementDashboardPage() {
                 <div className="text-xs font-semibold text-gray-600 mb-1">Current data mode</div>
                 <div className="text-sm font-bold text-gray-800">{currentDataMode}</div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Основной режим сейчас localStorage. Панель не переключает режим автоматически.
+                  Панель диагностики не переключает режим данных автоматически.
                 </div>
+                {currentDataMode === 'supabase' && (
+                  <div className="text-[11px] text-amber-700 mt-1">
+                    Режим supabase уже активен: импорт localStorage обычно не нужен для нового проекта.
+                  </div>
+                )}
               </div>
               <div className="p-3 rounded-lg bg-white border border-slate-200">
                 <div className="text-xs font-semibold text-gray-600 mb-1">Supabase env status</div>

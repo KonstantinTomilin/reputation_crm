@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import type {
   CRMLink, CRMProject, CRMClient, CRMPayment, CRMAudit, CRMUser,
   CRMNotification, CRMSettings, CurrencyCode,
@@ -9,6 +9,7 @@ import { defaultProjectDeadline } from '@/lib/dateUtils';
 import { COMPLETED_WORK_STATUSES } from '@/lib/linkFinance';
 import { createCRMRepository } from '@/repositories/crm';
 import type { AuthUser, CRMSnapshot } from '@/repositories/crm/types';
+import type { AsyncSnapshotRepository } from '@/repositories/crm/CRMRepository';
 
 interface DataIntegrityIssue {
   type:
@@ -41,6 +42,8 @@ function migrateLinks(links: CRMLink[]): CRMLink[] {
 export const IS_PRODUCTION_UI = import.meta.env.PROD;
 
 interface CRMContextValue {
+  isDataLoading: boolean;
+  dataLoadError: string | null;
   // Data
   links: CRMLink[];
   projects: CRMProject[];
@@ -115,6 +118,15 @@ const CRMContext = createContext<CRMContextValue | null>(null);
 export function CRMProvider({ children }: { children: React.ReactNode }) {
   const repository = useMemo(() => createCRMRepository(), []);
   const initialSnapshot = useMemo<CRMSnapshot>(() => repository.loadSnapshot(), [repository]);
+  const isAsyncRepository = useMemo(
+    () =>
+      typeof (repository as Partial<AsyncSnapshotRepository>).loadSnapshotAsync === 'function' &&
+      typeof (repository as Partial<AsyncSnapshotRepository>).saveSnapshotAsync === 'function',
+    [repository]
+  );
+  const isHydratingRef = useRef(isAsyncRepository);
+  const [isDataLoading, setIsDataLoading] = useState<boolean>(isAsyncRepository);
+  const [dataLoadError, setDataLoadError] = useState<string | null>(null);
   // TODO(Stage 2.2): move remaining direct localStorage usages from AuthGuard/login hooks
   // to repository-backed read APIs to fully decouple UI from storage implementation.
 
@@ -127,6 +139,47 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
   const [audits, setAudits] = useState<CRMAudit[]>(() => initialSnapshot.audits);
   const [users, setUsers] = useState<CRMUser[]>(() => initialSnapshot.users);
   const [authUsers, setAuthUsers] = useState<AuthUser[]>(() => initialSnapshot.authUsers);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!isAsyncRepository) {
+      isHydratingRef.current = false;
+      setIsDataLoading(false);
+      return;
+    }
+
+    const asyncRepository = repository as AsyncSnapshotRepository;
+    setIsDataLoading(true);
+    setDataLoadError(null);
+    asyncRepository
+      .loadSnapshotAsync()
+      .then((snapshot) => {
+        if (!mounted) return;
+        setLinks(migrateLinks(snapshot.links));
+        setProjects(snapshot.projects);
+        setClients(snapshot.clients);
+        setPayments(snapshot.payments);
+        setAudits(snapshot.audits);
+        setUsers(snapshot.users);
+        setAuthUsers(snapshot.authUsers);
+        setNotifications(snapshot.notifications);
+        setSettings(snapshot.settings);
+      })
+      .catch((error) => {
+        if (!mounted) return;
+        const message = error instanceof Error ? error.message : 'Failed to load CRM data from repository.';
+        setDataLoadError(message);
+      })
+      .finally(() => {
+        if (!mounted) return;
+        isHydratingRef.current = false;
+        setIsDataLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [repository, isAsyncRepository]);
 
   const getProjectCurrency = useCallback(
     (projectId: number): CurrencyCode => {
@@ -659,7 +712,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
   // Persist via repository (Stage 2.1)
   // TODO(Stage 2.2): migrate write-heavy methods to async repository contract for backend mode.
   useEffect(() => {
-    repository.saveSnapshot({
+    const snapshot: CRMSnapshot = {
       links,
       projects,
       clients,
@@ -669,11 +722,25 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       authUsers,
       notifications,
       settings,
-    });
-  }, [links, projects, clients, payments, audits, users, authUsers, notifications, settings, repository]);
+    };
+
+    if (isAsyncRepository) {
+      if (isHydratingRef.current) return;
+      const asyncRepository = repository as AsyncSnapshotRepository;
+      void asyncRepository.saveSnapshotAsync(snapshot).catch((error) => {
+        const message = error instanceof Error ? error.message : 'Failed to save CRM data to async repository.';
+        setDataLoadError(message);
+      });
+      return;
+    }
+
+    repository.saveSnapshot(snapshot);
+  }, [links, projects, clients, payments, audits, users, authUsers, notifications, settings, repository, isAsyncRepository]);
 
   const value = useMemo(
     () => ({
+      isDataLoading,
+      dataLoadError,
       links,
       projects,
       clients,
@@ -721,6 +788,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       softDeleteUser,
     }),
     [
+      isDataLoading, dataLoadError,
       links, projects, clients, payments, audits, users, authUsers,
       notifications, settings,
       updateLink, addLink, changeLinkStatus, addCommentToLink,
@@ -730,6 +798,24 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       pushNotification, markNotificationRead, markAllNotificationsRead, getNotificationsForUser, getProjectCurrency, softDeleteUser,
     ]
   );
+  if (isDataLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-600 text-sm">
+        Загрузка данных CRM...
+      </div>
+    );
+  }
+
+  if (dataLoadError && isAsyncRepository) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
+        <div className="max-w-md w-full bg-white border border-red-100 rounded-xl p-5 text-sm text-red-700">
+          <div className="font-semibold mb-1">Ошибка загрузки данных из Supabase</div>
+          <div>{dataLoadError}</div>
+        </div>
+      </div>
+    );
+  }
 
   return <CRMContext.Provider value={value}>{children}</CRMContext.Provider>;
 }
