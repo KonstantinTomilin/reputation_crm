@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Stage 2.5 skeleton (not auto-deployed by app build).
 // Deploy manually via Supabase CLI if/when ready.
 // Uses service role ONLY inside edge function runtime.
@@ -24,9 +25,21 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const serviceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const serviceRole =
+      Deno.env.get('CRM_SUPABASE_SERVICE_ROLE_KEY') ??
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ??
+      '';
     const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
-    if (!supabaseUrl || !serviceRole || !anon) {
+    if (!serviceRole) {
+      return new Response(
+        JSON.stringify({ error: 'Missing CRM_SUPABASE_SERVICE_ROLE_KEY Edge Function secret' }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+    if (!supabaseUrl || !anon) {
       return new Response(JSON.stringify({ error: 'Missing required Supabase env vars.' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
