@@ -717,7 +717,18 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
       .select('*')
       .eq('scope', 'global')
       .is('user_id', null);
-    if (error) throw new Error(error.message);
+    if (error) {
+      // In controlled RLS rollout settings access may be temporarily restricted.
+      // Keep app boot resilient with safe defaults.
+      // eslint-disable-next-line no-console
+      console.warn('[CRM] listSettings fallback due to error:', error.message);
+      return {
+        notificationsEnabled: true,
+        soundNotificationsEnabled: false,
+        anonymizeExecutors: false,
+        autoAuditNewLinks: false,
+      };
+    }
     return mapDbSettingsToSettings((data ?? []) as DbSettingRow[]);
   }
 

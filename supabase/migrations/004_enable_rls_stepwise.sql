@@ -1,0 +1,55 @@
+-- Stage 2.7: Controlled RLS enable plan.
+-- IMPORTANT:
+-- Execute one STEP at a time, then run smoke tests before proceeding.
+-- This file is intentionally documentation-first to avoid accidental all-table activation.
+
+-- ============================================================================
+-- STEP 1 (low risk): notifications + users
+-- ============================================================================
+-- APPLY:
+-- alter table crm_notifications enable row level security;
+-- alter table crm_users enable row level security;
+--
+-- ROLLBACK:
+-- alter table crm_notifications disable row level security;
+-- alter table crm_users disable row level security;
+
+-- ============================================================================
+-- STEP 2: clients + projects
+-- ============================================================================
+-- APPLY:
+-- alter table crm_clients enable row level security;
+-- alter table crm_projects enable row level security;
+--
+-- ROLLBACK:
+-- alter table crm_clients disable row level security;
+-- alter table crm_projects disable row level security;
+
+-- ============================================================================
+-- STEP 3: links + audits
+-- ============================================================================
+-- APPLY:
+-- alter table crm_links enable row level security;
+-- alter table crm_audits enable row level security;
+--
+-- ROLLBACK:
+-- alter table crm_links disable row level security;
+-- alter table crm_audits disable row level security;
+
+-- ============================================================================
+-- STEP 4: finance + settings + logs + reports + integrity
+-- ============================================================================
+-- APPLY:
+-- alter table crm_financial_operations enable row level security;
+-- alter table crm_settings enable row level security;
+-- alter table crm_audit_log enable row level security;
+-- alter table crm_reports enable row level security;
+-- alter table crm_integrity_issues enable row level security;
+--
+-- ROLLBACK:
+-- alter table crm_financial_operations disable row level security;
+-- alter table crm_settings disable row level security;
+-- alter table crm_audit_log disable row level security;
+-- alter table crm_reports disable row level security;
+-- alter table crm_integrity_issues disable row level security;
+

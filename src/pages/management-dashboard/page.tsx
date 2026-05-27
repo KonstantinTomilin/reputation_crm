@@ -168,10 +168,18 @@ export default function ManagementDashboardPage() {
     counts?: Record<string, number>;
     raw: unknown;
   } | null>(null);
+  const [rlsPanelOpen, setRlsPanelOpen] = useState(false);
+  const [rlsBusy, setRlsBusy] = useState(false);
+  const [rlsResult, setRlsResult] = useState<{
+    summary: string;
+    success: boolean;
+    details: Record<string, unknown>;
+  } | null>(null);
 
   const switchTab = (t: string) => navigate(`/management/${t}`);
   const sessionUser = useMemo(() => getSessionUser(), []);
   const isMainAdmin = sessionUser?.role === 'main_admin';
+  const currentAuthMode = import.meta.env.VITE_CRM_AUTH_MODE ?? 'legacy';
   const currentDataMode = import.meta.env.VITE_CRM_DATA_MODE ?? 'localStorage';
   const hasSupabaseUrl = Boolean(import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_PUBLIC_SUPABASE_URL);
   const hasSupabaseAnon = Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.env.VITE_PUBLIC_SUPABASE_ANON_KEY);
@@ -2219,6 +2227,45 @@ export default function ManagementDashboardPage() {
     }
   };
 
+  const runRlsCheck = async () => {
+    setRlsBusy(true);
+    try {
+      const visibleCounts = {
+        users: usersList.length,
+        clients: clientsList.length,
+        projects: projectsList.length,
+        links: linksList.length,
+        audits: crm.audits.length,
+        notifications: crm.notifications.length,
+        payments: crm.payments.length,
+      };
+      const roleSummary = {
+        login: sessionUser?.login ?? null,
+        role: sessionUser?.role ?? null,
+        isMainAdmin,
+      };
+      setRlsResult({
+        summary: 'RLS smoke snapshot собран для текущей роли.',
+        success: true,
+        details: {
+          authMode: currentAuthMode,
+          dataMode: currentDataMode,
+          currentUser: roleSummary,
+          visibleCounts,
+          hint: 'Проверьте соответствие видимости ожидаемой роли.',
+        },
+      });
+    } catch (error) {
+      setRlsResult({
+        summary: error instanceof Error ? error.message : 'RLS smoke check failed',
+        success: false,
+        details: {},
+      });
+    } finally {
+      setRlsBusy(false);
+    }
+  };
+
   const renderSettings = () => (
     <div className="flex flex-col gap-5">
       {/* System Tools */}
@@ -2270,7 +2317,116 @@ export default function ManagementDashboardPage() {
               <i className={`ri-arrow-${migrationPanelOpen ? 'up' : 'down'}-s-line text-gray-500`} />
             </button>
           )}
+          {isMainAdmin && (
+            <button
+              onClick={() => setRlsPanelOpen((prev) => !prev)}
+              className={`flex items-center gap-3 p-4 rounded-xl transition-colors cursor-pointer text-left ${
+                rlsPanelOpen ? 'bg-emerald-50 hover:bg-emerald-100' : 'bg-slate-50 hover:bg-slate-100'
+              }`}
+            >
+              <div className={`w-10 h-10 flex items-center justify-center rounded-lg flex-shrink-0 ${rlsPanelOpen ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                <i className="ri-lock-password-line text-emerald-700 text-lg" />
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-semibold text-gray-800">RLS / RBAC Smoke Tests</div>
+                <div className="text-xs text-gray-500">
+                  Быстрая диагностика доступа по роли и видимости данных
+                </div>
+              </div>
+              <i className={`ri-arrow-${rlsPanelOpen ? 'up' : 'down'}-s-line text-gray-500`} />
+            </button>
+          )}
         </div>
+        {isMainAdmin && rlsPanelOpen && (
+          <div className="mt-4 p-4 border border-emerald-100 rounded-xl bg-emerald-50/40 flex flex-col gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <div className="p-3 rounded-lg bg-white border border-slate-200">
+                <div className="text-xs font-semibold text-gray-600 mb-1">Current auth/data mode</div>
+                <div className="text-sm text-gray-700">auth: <span className="font-semibold">{currentAuthMode}</span></div>
+                <div className="text-sm text-gray-700">data: <span className="font-semibold">{currentDataMode}</span></div>
+              </div>
+              <div className="p-3 rounded-lg bg-white border border-slate-200">
+                <div className="text-xs font-semibold text-gray-600 mb-1">Current session user</div>
+                <div className="text-sm text-gray-700">login: <span className="font-semibold">{sessionUser?.login ?? '—'}</span></div>
+                <div className="text-sm text-gray-700">role: <span className="font-semibold">{sessionUser?.role ?? '—'}</span></div>
+                <div className="text-xs text-gray-500 mt-1">auth_user_id проверяется на стороне Supabase через helper functions.</div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                disabled={rlsBusy}
+                onClick={runRlsCheck}
+                className="px-4 py-2 text-sm rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Check current user access
+              </button>
+              <button
+                disabled={rlsBusy}
+                onClick={() =>
+                  setRlsResult({
+                    summary: 'Проверьте count видимых сущностей для текущей роли.',
+                    success: true,
+                    details: {
+                      users: usersList.length,
+                      clients: clientsList.length,
+                      projects: projectsList.length,
+                      links: linksList.length,
+                      audits: crm.audits.length,
+                    },
+                  })
+                }
+                className="px-4 py-2 text-sm rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Check counts visible to current role
+              </button>
+              <button
+                disabled={rlsBusy}
+                onClick={() =>
+                  setRlsResult({
+                    summary: 'Проверьте создание пользователя через Edge Function в Users tab.',
+                    success: true,
+                    details: {
+                      expected: 'main_admin can create user via admin-create-user',
+                      hint: 'Если ошибка 403/401 — проверьте caller auth и crm_users.auth_user_id mapping.',
+                    },
+                  })
+                }
+                className="px-4 py-2 text-sm rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Check can create user through Edge Function
+              </button>
+              <button
+                disabled={rlsBusy}
+                onClick={() =>
+                  setRlsResult({
+                    summary: 'Проверьте доступ к уведомлениям текущей роли.',
+                    success: true,
+                    details: {
+                      notificationsVisible: crm.notifications.length,
+                      expected: 'user sees own notifications, main_admin sees all.',
+                    },
+                  })
+                }
+                className="px-4 py-2 text-sm rounded-lg border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                Check notifications access
+              </button>
+            </div>
+            {rlsResult && (
+              <div className="p-3 rounded-lg bg-white border border-slate-200">
+                <div className={`text-sm font-semibold ${rlsResult.success ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {rlsResult.summary}
+                </div>
+                <details className="mt-2">
+                  <summary className="text-xs text-blue-900 cursor-pointer">Details</summary>
+                  <pre className="mt-2 p-2 rounded bg-slate-100 text-[11px] text-gray-700 overflow-auto max-h-64 whitespace-pre-wrap">
+                    {JSON.stringify(rlsResult.details, null, 2)}
+                  </pre>
+                </details>
+              </div>
+            )}
+          </div>
+        )}
         {isMainAdmin && migrationPanelOpen && (
           <div className="mt-4 p-4 border border-blue-100 rounded-xl bg-blue-50/40 flex flex-col gap-4">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">

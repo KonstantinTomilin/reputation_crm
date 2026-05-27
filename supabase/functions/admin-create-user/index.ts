@@ -71,8 +71,26 @@ Deno.serve(async (req) => {
       .eq('auth_user_id', caller.id)
       .is('deleted_at', null)
       .maybeSingle();
-    if (callerCrmErr || !callerCrm || callerCrm.role !== 'main_admin' || callerCrm.status !== 'active') {
-      return new Response(JSON.stringify({ error: 'Forbidden: main_admin only.' }), {
+    if (callerCrmErr) {
+      return new Response(JSON.stringify({ error: `Caller CRM profile lookup failed: ${callerCrmErr.message}` }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (!callerCrm) {
+      return new Response(JSON.stringify({ error: 'Caller CRM profile not found.' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (callerCrm.status !== 'active') {
+      return new Response(JSON.stringify({ error: 'Caller is not active.' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (callerCrm.role !== 'main_admin') {
+      return new Response(JSON.stringify({ error: 'Caller is not main_admin.' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
