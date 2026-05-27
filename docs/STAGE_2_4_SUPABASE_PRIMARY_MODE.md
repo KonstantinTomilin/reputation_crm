@@ -45,11 +45,33 @@
 2. Применить `supabase/seed.sql` (dev bootstrap).
 3. Использовать логин из seed и временный пароль `password` (bridge Stage 2.4).
 
+Важно:
+
+- `crm_users.login` должен быть уникальным (`crm_users_login_key`).
+- Если seed уже создал admin, не нужно создавать его повторно.
+- При конфликте логина используйте другой `login` или удалите тестового пользователя из `crm_users`.
+- При bootstrap/snapshot sync используется `ensureUserByLogin`: повторный insert одного и того же login не выполняется.
+
 Альтернатива SQL вручную:
 
 ```sql
 insert into crm_users (login, password_hash, role, display_name, status)
 values ('main_admin', 'password', 'main_admin', 'Main Admin', 'active');
+```
+
+Проверка логинов:
+
+```sql
+select id, login, role, status, created_at
+from crm_users
+order by created_at desc;
+```
+
+```sql
+select login, count(*) as cnt
+from crm_users
+group by login
+having count(*) > 1;
 ```
 
 ## Что хранится в Supabase

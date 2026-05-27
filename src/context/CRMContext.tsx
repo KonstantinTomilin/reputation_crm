@@ -729,7 +729,9 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       const asyncRepository = repository as AsyncSnapshotRepository;
       void asyncRepository.saveSnapshotAsync(snapshot).catch((error) => {
         const message = error instanceof Error ? error.message : 'Failed to save CRM data to async repository.';
-        setDataLoadError(message);
+        // Save failures should not block UI after successful initial load.
+        // eslint-disable-next-line no-console
+        console.error('[CRM] Async save failed:', message);
       });
       return;
     }

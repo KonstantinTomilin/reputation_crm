@@ -86,6 +86,17 @@ async function existsById(table: string, id: string): Promise<boolean> {
   return Boolean(data);
 }
 
+async function getUserIdByLogin(login: string): Promise<string | null> {
+  const client = getSupabaseClientOrThrow();
+  const { data, error } = await client
+    .from('crm_users')
+    .select('id')
+    .eq('login', login.trim().toLowerCase())
+    .maybeSingle();
+  if (error) throw new Error(`[crm_users] login check failed: ${error.message}`);
+  return (data?.id as string | undefined) ?? null;
+}
+
 async function upsertOrSkip(
   table: string,
   id: string,
@@ -209,6 +220,14 @@ export async function importLocalStorageToSupabase(
     const payload = mapUserToDbInsert({ ...user }, user.id);
     const id = payload.id ?? legacyIdToUuid('users', user.id);
     try {
+      const existingByLoginId = await getUserIdByLogin(user.login);
+      if (existingByLoginId && existingByLoginId !== id) {
+        report.skipped.users += 1;
+        report.warnings.push(
+          `User ${user.id} skipped: login "${user.login}" already exists with id ${existingByLoginId}.`
+        );
+        continue;
+      }
       await upsertOrSkip('crm_users', id, payload as Record<string, unknown>, normalizedOptions, 'users', report);
     } catch (error) {
       report.errors.push(`User ${user.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);

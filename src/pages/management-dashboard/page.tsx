@@ -295,6 +295,15 @@ export default function ManagementDashboardPage() {
 
   const handleSaveUser = useCallback(
     (form: Omit<CRMUser, 'id'>) => {
+      const normalizedLogin = form.login.trim().toLowerCase();
+      const duplicate = usersList.find(
+        (u) => u.login.trim().toLowerCase() === normalizedLogin && u.id !== userModal.user?.id
+      );
+      if (duplicate) {
+        window.alert('Пользователь с таким логином уже существует');
+        return;
+      }
+
       if (userModal.user) {
         crm.setUsers((prev) => prev.map((u) => (u.id === userModal.user!.id ? { ...u, ...form } : u)));
       } else {

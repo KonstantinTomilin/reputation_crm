@@ -10,7 +10,7 @@ import type {
 } from '@/mocks/crm';
 import { getSupabaseClientOrNull, testSupabaseConnection } from '@/lib/supabase';
 import { clientPaymentFromLegacy, executorPaymentFromLegacy, syncLegacyPaymentFlags } from '@/lib/linkFinance';
-import type { AsyncSnapshotRepository, CRMRepository } from './CRMRepository';
+import type { AsyncSnapshotRepository } from './CRMRepository';
 import { LocalStorageCRMRepository } from './LocalStorageCRMRepository';
 import type { AuthUser, CRMSnapshot, SessionUser } from './types';
 import {
@@ -48,6 +48,11 @@ export interface AsyncCRMRepository {
   getCurrentUser(): Promise<SessionUser | null>;
   healthCheck(): Promise<{ ok: boolean; message?: string }>;
   listUsers(): Promise<CRMUser[]>;
+  getUserByLogin(login: string): Promise<CRMUser | null>;
+  ensureUserByLogin(
+    input: Omit<CRMUser, 'id'>,
+    options?: { legacyId?: number; password?: string }
+  ): Promise<CRMUser>;
   createUser(input: Omit<CRMUser, 'id'>): Promise<CRMUser>;
   updateUser(input: CRMUser): Promise<CRMUser>;
   softDeleteUser(userId: number): Promise<void>;
@@ -82,6 +87,13 @@ export interface AsyncCRMRepository {
   getSetting(key: keyof CRMSettings): Promise<CRMSettings[keyof CRMSettings]>;
   upsertSetting(input: CRMSettings): Promise<CRMSettings>;
   runIntegrityChecks(): Promise<{ warnings: string[]; errors: string[] }>;
+}
+
+export class DuplicateLoginError extends Error {
+  constructor() {
+    super('Пользователь с таким логином уже существует');
+    this.name = 'DuplicateLoginError';
+  }
 }
 
 /**
@@ -146,19 +158,24 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
     this.localFallback.saveSnapshot(snapshot);
 
     const authMap = new Map(snapshot.authUsers.map((user) => [user.id, user]));
+    const userUuidByLegacyId = new Map<number, string>();
 
-    await Promise.all(
-      snapshot.users.map(async (user) => {
-        const payload = mapUserToDbInsert(user, user.id);
-        const authUser = authMap.get(user.id);
-        const data = {
-          ...payload,
-          password_hash: authUser?.password ?? payload.password_hash ?? 'password',
-        };
-        const { error } = await client.from('crm_users').upsert(data, { onConflict: 'id' });
-        if (error) throw new Error(`Failed to save user ${user.id}: ${error.message}`);
-      })
-    );
+    await Promise.all(snapshot.users.map(async (user) => {
+      const authUser = authMap.get(user.id);
+      try {
+        const row = await this.ensureUserRowByLogin(user, {
+          legacyId: user.id,
+          password: authUser?.password ?? 'password',
+        });
+        userUuidByLegacyId.set(user.id, row.id);
+      } catch (error) {
+        throw new Error(
+          `Failed to save user ${user.id} (${user.login}): ${
+            error instanceof Error ? error.message : 'Unknown error'
+          }`
+        );
+      }
+    }));
 
     await Promise.all(
       snapshot.clients.map(async (entity) => {
@@ -184,8 +201,12 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
         const payload = mapLinkToDbInsert(entity, {
           projectUuid: legacyIdToUuid('projects', entity.projectId),
           clientUuid: entity.clientId ? legacyIdToUuid('clients', entity.clientId) : null,
-          executorUuid: entity.executorId ? legacyIdToUuid('users', entity.executorId) : null,
-          auditorUuid: entity.auditorId ? legacyIdToUuid('users', entity.auditorId) : null,
+          executorUuid: entity.executorId
+            ? (userUuidByLegacyId.get(entity.executorId) ?? legacyIdToUuid('users', entity.executorId))
+            : null,
+          auditorUuid: entity.auditorId
+            ? (userUuidByLegacyId.get(entity.auditorId) ?? legacyIdToUuid('users', entity.auditorId))
+            : null,
           projectCurrency: projectCurrencyMap.get(entity.projectId) ?? null,
         });
         const { error } = await client.from('crm_links').upsert(payload, { onConflict: 'id' });
@@ -199,7 +220,9 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
         const payload = mapAuditToDbInsert(entity, {
           linkUuid: entity.linkId ? legacyIdToUuid('links', entity.linkId) : null,
           projectUuid: link ? legacyIdToUuid('projects', link.projectId) : null,
-          auditorUuid: entity.auditorId ? legacyIdToUuid('users', entity.auditorId) : null,
+          auditorUuid: entity.auditorId
+            ? (userUuidByLegacyId.get(entity.auditorId) ?? legacyIdToUuid('users', entity.auditorId))
+            : null,
         });
         const { error } = await client.from('crm_audits').upsert(payload, { onConflict: 'id' });
         if (error) throw new Error(`Failed to save audit ${entity.id}: ${error.message}`);
@@ -217,7 +240,7 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
     await Promise.all(
       snapshot.notifications.map(async (entity) => {
         const payload = mapNotificationToDbInsert(entity, {
-          userUuid: legacyIdToUuid('users', entity.userId),
+          userUuid: userUuidByLegacyId.get(entity.userId) ?? legacyIdToUuid('users', entity.userId),
         });
         const { error } = await client.from('crm_notifications').upsert(payload, { onConflict: 'id' });
         if (error) throw new Error(`Failed to save notification ${entity.id}: ${error.message}`);
@@ -314,12 +337,31 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
     return ((data ?? []) as DbUserRow[]).map(mapDbUserToUser);
   }
 
+  async getUserByLogin(login: string): Promise<CRMUser | null> {
+    const row = await this.getUserRowByLogin(login);
+    if (!row) return null;
+    return mapDbUserToUser(row);
+  }
+
+  async ensureUserByLogin(
+    input: Omit<CRMUser, 'id'>,
+    options?: { legacyId?: number; password?: string }
+  ): Promise<CRMUser> {
+    const row = await this.ensureUserRowByLogin(input, options);
+    return mapDbUserToUser(row);
+  }
+
   async createUser(input: Omit<CRMUser, 'id'>): Promise<CRMUser> {
     const client = getSupabaseClientOrNull();
     if (!client) throw new Error('Supabase env is not configured.');
+    const existing = await this.getUserByLogin(input.login);
+    if (existing) throw new DuplicateLoginError();
     const payload = mapUserToDbInsert(input);
     const { data, error } = await client.from('crm_users').insert(payload).select('*').single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      if (this.isDuplicateLoginError(error.message)) throw new DuplicateLoginError();
+      throw new Error(error.message);
+    }
     return mapDbUserToUser(data as DbUserRow);
   }
 
@@ -771,6 +813,66 @@ export class SupabaseCRMRepository implements AsyncSnapshotRepository, AsyncCRMR
       role: item.role as string,
       name: (item.display_name as string) ?? (item.login as string),
     }));
+  }
+
+  private normalizeLogin(login: string): string {
+    return login.trim().toLowerCase();
+  }
+
+  private isDuplicateLoginError(message: string | undefined): boolean {
+    return (message ?? '').includes('crm_users_login_key');
+  }
+
+  private async getUserRowByLogin(login: string): Promise<DbUserRow | null> {
+    const client = getSupabaseClientOrNull();
+    if (!client) throw new Error('Supabase env is not configured.');
+    const normalizedLogin = this.normalizeLogin(login);
+    const { data, error } = await client
+      .from('crm_users')
+      .select('*')
+      .eq('login', normalizedLogin)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (error) throw new Error(`Failed to get user by login: ${error.message}`);
+    return (data as DbUserRow | null) ?? null;
+  }
+
+  private async ensureUserRowByLogin(
+    input: Omit<CRMUser, 'id'>,
+    options?: { legacyId?: number; password?: string }
+  ): Promise<DbUserRow> {
+    const client = getSupabaseClientOrNull();
+    if (!client) throw new Error('Supabase env is not configured.');
+    const normalizedLogin = this.normalizeLogin(input.login);
+    const existing = await this.getUserRowByLogin(normalizedLogin);
+    if (existing) return existing;
+
+    const payload = mapUserToDbInsert(
+      { ...input, login: normalizedLogin },
+      options?.legacyId
+    );
+    const data = {
+      ...payload,
+      login: normalizedLogin,
+      password_hash: options?.password ?? payload.password_hash ?? 'password',
+    };
+
+    const { data: inserted, error } = await client
+      .from('crm_users')
+      .insert(data)
+      .select('*')
+      .single();
+
+    if (error) {
+      if (this.isDuplicateLoginError(error.message)) {
+        const conflictUser = await this.getUserRowByLogin(normalizedLogin);
+        if (conflictUser) return conflictUser;
+        throw new DuplicateLoginError();
+      }
+      throw new Error(`Failed to ensure user by login: ${error.message}`);
+    }
+
+    return inserted as DbUserRow;
   }
 }
 
