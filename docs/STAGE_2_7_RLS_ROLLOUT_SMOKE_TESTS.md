@@ -16,6 +16,16 @@ If something breaks after a step:
 - retest login and `/management/settings`
 - fix policies before re-enabling
 
+If you hit recursion errors (for example, `infinite recursion detected in policy for relation "crm_clients"`):
+
+- immediately disable RLS for core chain tables:
+  - `alter table crm_clients disable row level security;`
+  - `alter table crm_projects disable row level security;`
+  - `alter table crm_links disable row level security;`
+  - `alter table crm_audits disable row level security;`
+- re-apply fixed `supabase/migrations/003_rls_policies.sql`
+- restart rollout from STEP 1 only
+
 ## 3) SQL Editor caveat
 
 `auth.uid()` in Supabase SQL Editor does not represent browser user sessions the same way.
@@ -89,4 +99,28 @@ If app shows access issues after RLS step:
 - verify `crm_users.auth_user_id` is linked to Supabase Auth user
 - verify user `status='active'` and `deleted_at is null`
 - verify helper functions resolve current user/role
+
+## 8) Infinite recursion detected
+
+Root cause is usually recursive policy dependency across RLS-protected tables, e.g.:
+
+- policy on `crm_clients` reads `crm_links`
+- policy on `crm_links` reads `crm_projects`/`crm_clients`
+- policy chain loops back to the original table
+
+Safe pattern:
+
+- keep table policy predicates simple
+- move cross-table access checks into `SECURITY DEFINER` helpers with:
+  - `set search_path = public`
+  - `set row_security = off`
+- call helpers from policies instead of direct nested selects between RLS tables
+
+## 9) Re-check order after policy changes
+
+1. Re-apply `supabase/migrations/003_rls_policies.sql`.
+2. Enable STEP 1 (`crm_notifications`, `crm_users`) and run smoke checks.
+3. Enable STEP 2 (`crm_clients`, `crm_projects`) and re-check project/client views.
+4. Enable STEP 3 (`crm_links`, `crm_audits`) and re-check role visibility.
+5. Enable STEP 4 (finance/settings/logs/reports/integrity), then full regression smoke.
 

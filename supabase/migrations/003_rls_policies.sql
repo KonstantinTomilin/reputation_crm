@@ -58,10 +58,179 @@ as $$
   select crm_current_user_id() is not null
 $$;
 
+-- Access helpers intentionally run as SECURITY DEFINER with row_security disabled
+-- to avoid recursive policy evaluation between crm_clients/crm_projects/crm_links.
+create or replace function crm_user_owns_client(p_client_id uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_current_user_id uuid;
+begin
+  if crm_is_main_admin() then
+    return true;
+  end if;
+
+  v_current_user_id := crm_current_user_id();
+  if v_current_user_id is null then
+    return false;
+  end if;
+
+  return exists (
+    select 1
+    from crm_clients c
+    where c.id = p_client_id
+      and c.user_id = v_current_user_id
+      and c.deleted_at is null
+  );
+end;
+$$;
+
+create or replace function crm_user_can_access_project(p_project_id uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_current_user_id uuid;
+  v_role text;
+begin
+  if crm_is_main_admin() then
+    return true;
+  end if;
+
+  v_current_user_id := crm_current_user_id();
+  v_role := crm_current_role();
+  if v_current_user_id is null then
+    return false;
+  end if;
+
+  if v_role = 'client' then
+    return exists (
+      select 1
+      from crm_projects p
+      join crm_clients c on c.id = p.client_id
+      where p.id = p_project_id
+        and p.deleted_at is null
+        and c.deleted_at is null
+        and c.user_id = v_current_user_id
+    );
+  end if;
+
+  if v_role = 'executor' then
+    return exists (
+      select 1
+      from crm_links l
+      where l.project_id = p_project_id
+        and l.executor_id = v_current_user_id
+        and l.deleted_at is null
+    );
+  end if;
+
+  if v_role = 'auditor' then
+    return exists (
+      select 1
+      from crm_links l
+      where l.project_id = p_project_id
+        and l.auditor_id = v_current_user_id
+        and l.deleted_at is null
+    )
+    or exists (
+      select 1
+      from crm_audits a
+      where a.project_id = p_project_id
+        and a.auditor_id = v_current_user_id
+        and a.deleted_at is null
+    );
+  end if;
+
+  return false;
+end;
+$$;
+
+create or replace function crm_user_can_access_link(p_link_id uuid)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+set row_security = off
+as $$
+declare
+  v_current_user_id uuid;
+  v_role text;
+  v_project_id uuid;
+begin
+  if crm_is_main_admin() then
+    return true;
+  end if;
+
+  v_current_user_id := crm_current_user_id();
+  v_role := crm_current_role();
+  if v_current_user_id is null then
+    return false;
+  end if;
+
+  if v_role = 'executor' then
+    return exists (
+      select 1
+      from crm_links l
+      where l.id = p_link_id
+        and l.executor_id = v_current_user_id
+        and l.deleted_at is null
+    );
+  end if;
+
+  if v_role = 'auditor' then
+    return exists (
+      select 1
+      from crm_links l
+      where l.id = p_link_id
+        and l.auditor_id = v_current_user_id
+        and l.deleted_at is null
+    )
+    or exists (
+      select 1
+      from crm_audits a
+      where a.link_id = p_link_id
+        and a.auditor_id = v_current_user_id
+        and a.deleted_at is null
+    );
+  end if;
+
+  if v_role = 'client' then
+    select l.project_id
+      into v_project_id
+    from crm_links l
+    where l.id = p_link_id
+      and l.deleted_at is null
+    limit 1;
+
+    if v_project_id is null then
+      return false;
+    end if;
+
+    return crm_user_can_access_project(v_project_id);
+  end if;
+
+  return false;
+end;
+$$;
+
 grant execute on function crm_current_user_id() to anon, authenticated;
 grant execute on function crm_current_role() to anon, authenticated;
 grant execute on function crm_is_main_admin() to anon, authenticated;
 grant execute on function crm_is_active() to anon, authenticated;
+grant execute on function crm_user_owns_client(uuid) to anon, authenticated;
+grant execute on function crm_user_can_access_project(uuid) to anon, authenticated;
+grant execute on function crm_user_can_access_link(uuid) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- crm_users
@@ -105,16 +274,6 @@ using (
   and (
     crm_is_main_admin()
     or user_id = crm_current_user_id()
-    or exists (
-      select 1
-      from crm_links l
-      where l.client_id = crm_clients.id
-        and (
-          l.executor_id = crm_current_user_id()
-          or l.auditor_id = crm_current_user_id()
-        )
-        and l.deleted_at is null
-    )
   )
 );
 
@@ -135,32 +294,7 @@ on crm_projects
 for select
 using (
   crm_is_active()
-  and (
-    crm_is_main_admin()
-    or exists (
-      select 1
-      from crm_clients c
-      where c.id = crm_projects.client_id
-        and c.user_id = crm_current_user_id()
-    )
-    or exists (
-      select 1
-      from crm_links l
-      where l.project_id = crm_projects.id
-        and (
-          l.executor_id = crm_current_user_id()
-          or l.auditor_id = crm_current_user_id()
-        )
-        and l.deleted_at is null
-    )
-    or exists (
-      select 1
-      from crm_audits a
-      where a.project_id = crm_projects.id
-        and a.auditor_id = crm_current_user_id()
-        and a.deleted_at is null
-    )
-  )
+  and crm_user_can_access_project(id)
 );
 
 drop policy if exists crm_projects_write_admin_only on crm_projects;
@@ -180,18 +314,7 @@ on crm_links
 for select
 using (
   crm_is_active()
-  and (
-    crm_is_main_admin()
-    or executor_id = crm_current_user_id()
-    or auditor_id = crm_current_user_id()
-    or exists (
-      select 1
-      from crm_projects p
-      join crm_clients c on c.id = p.client_id
-      where p.id = crm_links.project_id
-        and c.user_id = crm_current_user_id()
-    )
-  )
+  and crm_user_can_access_link(id)
 );
 
 drop policy if exists crm_links_insert_admin_only on crm_links;
@@ -243,6 +366,8 @@ using (
   and (
     crm_is_main_admin()
     or auditor_id = crm_current_user_id()
+    or (project_id is not null and crm_user_can_access_project(project_id))
+    or (link_id is not null and crm_user_can_access_link(link_id))
   )
 );
 
@@ -334,12 +459,8 @@ using (
   and (
     crm_is_main_admin()
     or executor_id = crm_current_user_id()
-    or exists (
-      select 1
-      from crm_clients c
-      where c.id = crm_financial_operations.client_id
-        and c.user_id = crm_current_user_id()
-    )
+    or (client_id is not null and crm_user_owns_client(client_id))
+    or (project_id is not null and crm_user_can_access_project(project_id))
   )
 );
 

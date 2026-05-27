@@ -53,3 +53,16 @@
 -- alter table crm_reports disable row level security;
 -- alter table crm_integrity_issues disable row level security;
 
+-- ============================================================================
+-- EMERGENCY ROLLBACK (infinite recursion / policy loop symptoms)
+-- ============================================================================
+-- If API responses contain:
+--   "infinite recursion detected in policy for relation ..."
+-- disable RLS for the core chain immediately:
+-- alter table crm_clients disable row level security;
+-- alter table crm_projects disable row level security;
+-- alter table crm_links disable row level security;
+-- alter table crm_audits disable row level security;
+--
+-- Then re-apply fixed `003_rls_policies.sql` and enable steps again from STEP 1.
+
