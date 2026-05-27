@@ -167,8 +167,11 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((error) => {
         if (!mounted) return;
-        const message = error instanceof Error ? error.message : 'Failed to load CRM data from repository.';
-        setDataLoadError(message);
+        const rawMessage = error instanceof Error ? error.message : 'Failed to load CRM data from repository.';
+        const hint = /rls|permission|denied|auth_user_id|401|403/i.test(rawMessage)
+          ? ' Проверьте RLS policies и auth mapping crm_users.auth_user_id.'
+          : '';
+        setDataLoadError(`${rawMessage}${hint}`);
       })
       .finally(() => {
         if (!mounted) return;

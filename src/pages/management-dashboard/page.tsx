@@ -31,6 +31,7 @@ import { COMPLETED_WORK_STATUSES, setClientPaymentStatus, setExecutorPaymentStat
 import { getSessionUser } from '@/lib/auth';
 import { IS_PRODUCTION_UI } from '@/context/CRMContext';
 import { testSupabaseConnection } from '@/lib/supabase';
+import { createAuthUserForCrmUser } from '@/services/authService';
 import { exportLocalStorageSnapshot } from '@/repositories/crm/localStorageExport';
 import {
   dryRunImportLocalStorageToSupabase,
@@ -293,8 +294,9 @@ export default function ManagementDashboardPage() {
     });
   }, [linksList, paymentsList, financeFilters]);
 
+  const authMode = import.meta.env.VITE_CRM_AUTH_MODE ?? 'legacy';
   const handleSaveUser = useCallback(
-    (form: Omit<CRMUser, 'id'>) => {
+    async (form: Omit<CRMUser, 'id'>) => {
       const normalizedLogin = form.login.trim().toLowerCase();
       const duplicate = usersList.find(
         (u) => u.login.trim().toLowerCase() === normalizedLogin && u.id !== userModal.user?.id
@@ -307,10 +309,28 @@ export default function ManagementDashboardPage() {
       if (userModal.user) {
         crm.setUsers((prev) => prev.map((u) => (u.id === userModal.user!.id ? { ...u, ...form } : u)));
       } else {
+        const password = (form as any).password || 'password';
+        if (authMode === 'supabase') {
+          try {
+            await createAuthUserForCrmUser({
+              login: form.login,
+              password,
+              role: form.role,
+              display_name: form.fullName,
+              status: form.status === 'заблокирован' ? 'blocked' : 'active',
+            });
+          } catch (error) {
+            window.alert(
+              error instanceof Error
+                ? error.message
+                : 'Не удалось создать пользователя через Supabase auth bridge.'
+            );
+            return;
+          }
+        }
         const newId = Math.max(...usersList.map((u) => u.id), 0) + 1;
         crm.setUsers((prev) => [...prev, { ...form, id: newId } as CRMUser]);
         // Auto-create auth user for login
-        const password = (form as any).password || 'password';
         crm.addAuthUser({
           email: form.email,
           login: form.login,
@@ -320,7 +340,7 @@ export default function ManagementDashboardPage() {
         });
       }
     },
-    [userModal.user, usersList, crm]
+    [userModal.user, usersList, crm, authMode]
   );
 
   const handleDeleteUser = (id: number) => {

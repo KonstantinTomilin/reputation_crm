@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import type { UserRole } from '@/mocks/crm';
 import { useCRM } from '@/context/CRMContext';
+import { signOut } from '@/services/authService';
 
 const managementNav = [
   { label: 'Обзор', icon: 'ri-dashboard-line', path: '/management/overview' },
@@ -126,8 +127,8 @@ export default function CRMLayout({ role, children }: { role: UserRole; children
         {/* Footer */}
         <div className="px-5 py-4 border-t border-gray-100">
           <button
-            onClick={() => {
-              localStorage.removeItem('crm_user');
+            onClick={async () => {
+              await signOut();
               navigate('/', { replace: true });
             }}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"

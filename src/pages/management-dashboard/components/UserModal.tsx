@@ -4,7 +4,7 @@ import type { CRMUser, UserRole } from '@/mocks/crm';
 interface UserModalProps {
   user?: CRMUser;
   onClose: () => void;
-  onSave: (u: Omit<CRMUser, 'id'>) => void;
+  onSave: (u: Omit<CRMUser, 'id'>) => void | Promise<void>;
 }
 
 export default function UserModal({ user, onClose, onSave }: UserModalProps) {
@@ -123,8 +123,8 @@ export default function UserModal({ user, onClose, onSave }: UserModalProps) {
         </div>
 
         <button
-          onClick={() => {
-            onSave(form as Omit<CRMUser, 'id'>);
+          onClick={async () => {
+            await onSave(form as Omit<CRMUser, 'id'>);
             onClose();
           }}
           className="mt-2 w-full py-2.5 bg-blue-900 text-white text-sm font-semibold rounded-lg hover:bg-blue-800 transition-colors cursor-pointer whitespace-nowrap"

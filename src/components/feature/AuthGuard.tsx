@@ -4,6 +4,8 @@ import { canAccessPath, getHomeRoute, getSessionUser } from '@/lib/auth';
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const session = getSessionUser();
+  const authMode = import.meta.env.VITE_CRM_AUTH_MODE ?? 'legacy';
+  const isSupabaseAuthMode = authMode === 'supabase';
 
   if (!session) {
     return <Navigate to="/" replace state={{ from: location.pathname }} />;
@@ -11,6 +13,10 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (!canAccessPath(session.role, location.pathname)) {
     return <Navigate to={getHomeRoute(session.role)} replace />;
+  }
+
+  if (isSupabaseAuthMode) {
+    return <>{children}</>;
   }
 
   // Re-check user status on each guarded route navigation.

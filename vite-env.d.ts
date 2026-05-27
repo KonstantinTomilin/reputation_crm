@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_CRM_DATA_MODE?: 'localStorage' | 'backend' | 'supabase';
+  readonly VITE_CRM_AUTH_MODE?: 'legacy' | 'supabase';
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_ANON_KEY?: string;
   readonly VITE_PUBLIC_SUPABASE_URL?: string;

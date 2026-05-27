@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCRM } from '@/context/CRMContext';
 import { getHomeRoute, setSessionUser } from '@/lib/auth';
+import { signInWithLogin } from '@/services/authService';
 
 export default function LoginPage() {
   const navigate = useNavigate();
@@ -18,40 +19,52 @@ export default function LoginPage() {
   const [setupConfirm, setSetupConfirm] = useState('');
   const [setupError, setSetupError] = useState('');
   const [setupSuccess, setSetupSuccess] = useState(false);
+  const authMode = import.meta.env.VITE_CRM_AUTH_MODE ?? 'legacy';
+  const isSupabaseAuthMode = authMode === 'supabase';
 
   const isFirstTime = crm.authUsers.length === 0 && crm.users.length === 0;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const id = identifier.trim().toLowerCase();
+    const id = identifier.trim();
     const pw = password.trim();
+    try {
+      if (isSupabaseAuthMode) {
+        const sessionUser = await signInWithLogin(id, pw);
+        navigate(getHomeRoute(sessionUser.role));
+        return;
+      }
 
-    const user = crm.authUsers.find(
-      (u) =>
-        (u.email.toLowerCase() === id || (u.login && u.login.toLowerCase() === id)) &&
-        u.password === pw
-    );
+      const normalized = id.toLowerCase();
+      const user = crm.authUsers.find(
+        (u) =>
+          (u.email.toLowerCase() === normalized || (u.login && u.login.toLowerCase() === normalized)) &&
+          u.password === pw
+      );
 
-    if (!user) {
-      setError('Неверный логин или пароль');
-      return;
+      if (!user) {
+        setError('Неверный логин или пароль');
+        return;
+      }
+
+      const crmUser = crm.users.find((u) => u.id === user.id);
+      if (crmUser?.status === 'заблокирован' || crmUser?.isDeleted) {
+        setError('Учётная запись заблокирована. Обратитесь к администратору.');
+        return;
+      }
+
+      setSessionUser({
+        id: user.id,
+        email: user.email,
+        login: user.login,
+        role: user.role,
+        name: user.name,
+      });
+      navigate(getHomeRoute(user.role));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ошибка входа');
     }
-
-    const crmUser = crm.users.find((u) => u.id === user.id);
-    if (crmUser?.status === 'заблокирован' || crmUser?.isDeleted) {
-      setError('Учётная запись заблокирована. Обратитесь к администратору.');
-      return;
-    }
-
-    setSessionUser({
-      id: user.id,
-      email: user.email,
-      login: user.login,
-      role: user.role,
-      name: user.name,
-    });
-    navigate(getHomeRoute(user.role));
   };
 
   const handleSetup = (e: React.FormEvent) => {
@@ -115,7 +128,7 @@ export default function LoginPage() {
             <p className="text-xs text-slate-400">Управление ссылками и репутацией</p>
           </div>
 
-          {isFirstTime ? (
+          {isFirstTime && !isSupabaseAuthMode ? (
             <form onSubmit={handleSetup} className="flex flex-col gap-4">
               <div className="p-3 rounded-lg bg-blue-900/10 border border-blue-800/20 text-[11px] text-slate-400">
                 Первый запуск: создайте главного администратора. Регистрация только через админа.
@@ -133,6 +146,11 @@ export default function LoginPage() {
             </form>
           ) : (
             <form onSubmit={handleLogin} className="flex flex-col gap-5">
+              {isFirstTime && isSupabaseAuthMode && (
+                <div className="p-3 rounded-lg bg-amber-900/10 border border-amber-800/20 text-[11px] text-slate-300">
+                  Supabase auth mode: сначала создайте и свяжите первого main_admin в Supabase (Auth + crm_users.auth_user_id).
+                </div>
+              )}
               <div>
                 <label className="text-xs text-slate-400 font-medium">Логин или e-mail</label>
                 <input type="text" value={identifier} onChange={(e) => setIdentifier(e.target.value)} className={`mt-1.5 ${inputCls}`} />
