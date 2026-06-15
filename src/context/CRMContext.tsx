@@ -111,6 +111,7 @@ interface CRMContextValue {
 
   getProjectCurrency: (projectId: number) => CurrencyCode;
   softDeleteUser: (userId: number) => void;
+  reloadSnapshot: () => Promise<void>;
 }
 
 const CRMContext = createContext<CRMContextValue | null>(null);
@@ -140,6 +141,28 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
   const [users, setUsers] = useState<CRMUser[]>(() => initialSnapshot.users);
   const [authUsers, setAuthUsers] = useState<AuthUser[]>(() => initialSnapshot.authUsers);
 
+  const applySnapshot = useCallback((snapshot: CRMSnapshot) => {
+    setLinks(migrateLinks(snapshot.links));
+    setProjects(snapshot.projects);
+    setClients(snapshot.clients);
+    setPayments(snapshot.payments);
+    setAudits(snapshot.audits);
+    setUsers(snapshot.users);
+    setAuthUsers(snapshot.authUsers);
+    setNotifications(snapshot.notifications);
+    setSettings(snapshot.settings);
+  }, []);
+
+  const reloadSnapshot = useCallback(async () => {
+    if (!isAsyncRepository) {
+      applySnapshot(repository.loadSnapshot());
+      return;
+    }
+    const asyncRepository = repository as AsyncSnapshotRepository;
+    const snapshot = await asyncRepository.loadSnapshotAsync();
+    applySnapshot(snapshot);
+  }, [applySnapshot, isAsyncRepository, repository]);
+
   useEffect(() => {
     let mounted = true;
     if (!isAsyncRepository) {
@@ -155,15 +178,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       .loadSnapshotAsync()
       .then((snapshot) => {
         if (!mounted) return;
-        setLinks(migrateLinks(snapshot.links));
-        setProjects(snapshot.projects);
-        setClients(snapshot.clients);
-        setPayments(snapshot.payments);
-        setAudits(snapshot.audits);
-        setUsers(snapshot.users);
-        setAuthUsers(snapshot.authUsers);
-        setNotifications(snapshot.notifications);
-        setSettings(snapshot.settings);
+        applySnapshot(snapshot);
       })
       .catch((error) => {
         if (!mounted) return;
@@ -182,7 +197,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
     return () => {
       mounted = false;
     };
-  }, [repository, isAsyncRepository]);
+  }, [repository, isAsyncRepository, applySnapshot]);
 
   const getProjectCurrency = useCallback(
     (projectId: number): CurrencyCode => {
@@ -791,6 +806,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       getNotificationsForUser,
       getProjectCurrency,
       softDeleteUser,
+      reloadSnapshot,
     }),
     [
       isDataLoading, dataLoadError,
@@ -800,7 +816,7 @@ export function CRMProvider({ children }: { children: React.ReactNode }) {
       updateProject, addProject, deleteProject, addPayment, addClient, markLinkClientPaid, markLinkExecutorPaid, addAudit, updateAudit, addAuthUser,
       checkIntegrity, resetTestEnvironment,
       getProjectLinks, getClientLinks, getExecutorLinks, getProjectRevenue, getProjectPayouts, getLinkAudit,
-      pushNotification, markNotificationRead, markAllNotificationsRead, getNotificationsForUser, getProjectCurrency, softDeleteUser,
+      pushNotification, markNotificationRead, markAllNotificationsRead, getNotificationsForUser, getProjectCurrency, softDeleteUser, reloadSnapshot,
     ]
   );
   if (isDataLoading) {

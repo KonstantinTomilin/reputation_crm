@@ -101,6 +101,11 @@ export default function KanbanView() {
                         <div className="flex flex-wrap items-center gap-1 mt-1.5">
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{link.type}</span>
                           <StatusBadge status={link.status} size="sm" />
+                          {['ожидает аудита', 'в аудите', 'на просчёт'].includes(link.status) && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700 font-semibold">
+                              {link.status === 'на просчёт' ? '→ исполнитель' : link.status === 'в аудите' ? '→ аудитор' : '→ в аудит'}
+                            </span>
+                          )}
                         </div>
                         <div className="flex justify-between mt-1.5 text-[10px]">
                           <span className={overdue ? 'text-red-500 font-semibold' : 'text-gray-400'}>

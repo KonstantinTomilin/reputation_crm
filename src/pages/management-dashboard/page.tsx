@@ -15,6 +15,7 @@ import AuditsTab from './components/AuditsTab';
 import ExecutorPaymentModal from './components/ExecutorPaymentModal';
 import ProjectDetailModal from './components/ProjectDetailModal';
 import FinanceReportTab from './components/FinanceReportTab';
+import LinkComments from '@/pages/executor-project/components/LinkComments';
 
 import { useCRM } from '@/context/CRMContext';
 import {
@@ -99,8 +100,6 @@ export default function ManagementDashboardPage() {
   const [executorReportId, setExecutorReportId] = useState<number | null>(null);
   const [executorPaymentId, setExecutorPaymentId] = useState<number | null>(null);
   const [projectDetailId, setProjectDetailId] = useState<number | null>(null);
-
-  const [commentInputs, setCommentInputs] = useState<Record<number, string>>({});
 
   const [projectModal, setProjectModal] = useState<{ open: boolean }>({ open: false });
   const [linksFilters, setLinksFilters] = useState({
@@ -306,47 +305,54 @@ export default function ManagementDashboardPage() {
   const handleSaveUser = useCallback(
     async (form: Omit<CRMUser, 'id'>) => {
       const normalizedLogin = form.login.trim().toLowerCase();
+      if (!form.fullName.trim()) {
+        throw new Error('Укажите ФИО / название.');
+      }
+      if (!normalizedLogin) {
+        throw new Error('Укажите логин.');
+      }
+
       const duplicate = usersList.find(
         (u) => u.login.trim().toLowerCase() === normalizedLogin && u.id !== userModal.user?.id
       );
       if (duplicate) {
-        window.alert('Пользователь с таким логином уже существует');
-        return;
+        throw new Error('Пользователь с таким логином уже существует');
       }
 
       if (userModal.user) {
         crm.setUsers((prev) => prev.map((u) => (u.id === userModal.user!.id ? { ...u, ...form } : u)));
-      } else {
-        const password = (form as any).password || 'password';
-        if (authMode === 'supabase') {
-          try {
-            await createAuthUserForCrmUser({
-              login: form.login,
-              password,
-              role: form.role,
-              display_name: form.fullName,
-              status: form.status === 'заблокирован' ? 'blocked' : 'active',
-            });
-          } catch (error) {
-            window.alert(
-              error instanceof Error
-                ? error.message
-                : 'Не удалось создать пользователя через Supabase auth bridge.'
-            );
-            return;
-          }
-        }
-        const newId = Math.max(...usersList.map((u) => u.id), 0) + 1;
-        crm.setUsers((prev) => [...prev, { ...form, id: newId } as CRMUser]);
-        // Auto-create auth user for login
-        crm.addAuthUser({
-          email: form.email,
-          login: form.login,
+        return;
+      }
+
+      const password = (form as CRMUser & { password?: string }).password?.trim() || 'password';
+      if (password.length < 6) {
+        throw new Error('Пароль должен быть не короче 6 символов.');
+      }
+
+      if (authMode === 'supabase') {
+        await createAuthUserForCrmUser({
+          login: normalizedLogin,
           password,
           role: form.role,
-          name: form.fullName,
+          display_name: form.fullName.trim(),
+          status: form.status === 'заблокирован' ? 'blocked' : 'active',
         });
+        // Reload users from Supabase to avoid duplicate local ids / stale list.
+        if (typeof crm.reloadSnapshot === 'function') {
+          await crm.reloadSnapshot();
+        }
+        return;
       }
+
+      const newId = Math.max(...usersList.map((u) => u.id), 0) + 1;
+      crm.setUsers((prev) => [...prev, { ...form, id: newId, login: normalizedLogin } as CRMUser]);
+      crm.addAuthUser({
+        email: form.email,
+        login: normalizedLogin,
+        password,
+        role: form.role,
+        name: form.fullName,
+      });
     },
     [userModal.user, usersList, crm, authMode]
   );
@@ -373,6 +379,38 @@ export default function ManagementDashboardPage() {
   const handleAddComment = (linkId: number, text: string) => {
     crm.addCommentToLink(linkId, text, 'Администратор', 'admin');
   };
+
+  const handleAddLinkToAudit = useCallback(
+    (link: CRMLink, target: 'auditor' | 'executor' = 'auditor') => {
+      if (crm.getLinkAudit(link.id)) {
+        throw new Error('Аудит для этой ссылки уже существует.');
+      }
+      crm.addAudit({
+        linkId: link.id,
+        removalProbability: 0,
+        deindexProbability: 0,
+        removalDaysEstimate: 0,
+        deindexDaysEstimate: 0,
+        costPerSE: { google: 0, yandex: 0, bing: 0, yahoo: 0 },
+        riskLevel: 'средний',
+        auditDate: new Date().toISOString().slice(0, 10),
+        auditorId: link.auditorId ?? 0,
+        notes: '',
+        auditType: 'проверка ссылки',
+        auditStatus: 'новый',
+      });
+      crm.changeLinkStatus(link.id, target === 'executor' ? 'на просчёт' : 'ожидает аудита');
+      crm.addCommentToLink(
+        link.id,
+        target === 'executor'
+          ? '[Аудит] Ссылка передана исполнителю на просчёт.'
+          : '[Аудит] Ссылка передана в аудит.',
+        'Администратор',
+        'admin'
+      );
+    },
+    [crm]
+  );
 
   const handleStatusChange = (linkId: number, newStatus: string) => {
     crm.changeLinkStatus(linkId, newStatus);
@@ -1054,18 +1092,30 @@ export default function ManagementDashboardPage() {
   );
 
   const filteredLinksList = useMemo(() => {
+    const deliveredStatuses = ['сдано', 'сдано клиенту', 'принято', 'не принято', 'отправлено клиенту'];
     return linksList.filter((l) => {
-      const matchSearch = !linksFilters.search || l.url.toLowerCase().includes(linksFilters.search.toLowerCase());
+      const projectName = projectsList.find((p) => p.id === l.projectId)?.name ?? '';
+      const searchHaystack = [
+        l.url,
+        projectName,
+        l.type,
+        l.geo ?? '',
+        l.status,
+        String(l.id),
+      ]
+        .join(' ')
+        .toLowerCase();
+      const matchSearch = !linksFilters.search || searchHaystack.includes(linksFilters.search.toLowerCase());
       const matchStatus = linksFilters.status === 'all' || l.status === linksFilters.status;
       const matchProject = linksFilters.project === 'all' || String(l.projectId) === linksFilters.project;
       const matchType = linksFilters.type === 'all' || l.type === linksFilters.type;
       const matchGeo = linksFilters.geo === 'all' || (l.geo && l.geo.includes(linksFilters.geo));
       const matchClientPaid = linksFilters.clientPaid === 'all' || (linksFilters.clientPaid === 'yes' ? l.clientPaid : !l.clientPaid);
       const matchExecutorPaid = linksFilters.executorPaid === 'all' || (linksFilters.executorPaid === 'yes' ? l.executorPaid : !l.executorPaid);
-      const matchDelivered = linksFilters.deliveredToClient === 'all' || (linksFilters.deliveredToClient === 'yes' ? ['сдано', 'сдано клиенту', 'принято', 'не принято', 'отправлено клиенту'].includes(l.status) : !['сдано', 'сдано клиенту', 'принято', 'не принято', 'отправлено клиенту'].includes(l.status));
+      const matchDelivered = linksFilters.deliveredToClient === 'all' || (linksFilters.deliveredToClient === 'yes' ? deliveredStatuses.includes(l.status) : !deliveredStatuses.includes(l.status));
       return matchSearch && matchStatus && matchProject && matchType && matchGeo && matchClientPaid && matchExecutorPaid && matchDelivered;
     });
-  }, [linksList, linksFilters]);
+  }, [linksList, linksFilters, projectsList]);
 
   // Project filters
   const [projectFilters, setProjectFilters] = useState({
@@ -1216,6 +1266,15 @@ export default function ManagementDashboardPage() {
           <option value="yes">Выплачено</option>
           <option value="no">Не выплачено</option>
         </select>
+        <select
+          value={linksFilters.deliveredToClient}
+          onChange={(e) => setLinksFilters((prev) => ({ ...prev, deliveredToClient: e.target.value as 'all' | 'yes' | 'no' }))}
+          className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-slate-400 bg-white cursor-pointer"
+        >
+          <option value="all">Сдано клиенту</option>
+          <option value="yes">Да</option>
+          <option value="no">Нет</option>
+        </select>
         <button
           onClick={() => setLinksFilters({ search: '', status: 'all', project: 'all', type: 'all', geo: 'all', clientPaid: 'all', executorPaid: 'all', deliveredToClient: 'all' })}
           className="px-3 py-2 text-sm text-blue-900 border border-slate-200 rounded-lg hover:bg-slate-50 cursor-pointer whitespace-nowrap"
@@ -1261,6 +1320,8 @@ export default function ManagementDashboardPage() {
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Оплата клиента</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Оплата исполнителю</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Сдано клиенту</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Комментарий</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Аудит</th>
               </tr>
             </thead>
             <tbody>
@@ -1328,11 +1389,53 @@ export default function ManagementDashboardPage() {
                       <span className="flex items-center gap-1 text-xs text-gray-400"><i className="ri-close-circle-line" />Нет</span>
                     )}
                   </td>
+                  <td className="px-4 py-3">
+                    <LinkComments
+                      comments={link.comments}
+                      onAddComment={(text) => handleAddComment(link.id, text)}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-1">
+                      {crm.getLinkAudit(link.id) ? (
+                        <span className="text-[10px] text-emerald-700 font-semibold">В аудите</span>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              try {
+                                handleAddLinkToAudit(link, 'auditor');
+                              } catch (error) {
+                                window.alert(error instanceof Error ? error.message : 'Не удалось добавить в аудит.');
+                              }
+                            }}
+                            className="px-2 py-1 text-[10px] font-semibold rounded bg-pink-50 text-pink-700 hover:bg-pink-100 cursor-pointer whitespace-nowrap"
+                          >
+                            В аудит
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              try {
+                                handleAddLinkToAudit(link, 'executor');
+                              } catch (error) {
+                                window.alert(error instanceof Error ? error.message : 'Не удалось передать на просчёт.');
+                              }
+                            }}
+                            className="px-2 py-1 text-[10px] font-semibold rounded bg-sky-50 text-sky-700 hover:bg-sky-100 cursor-pointer whitespace-nowrap"
+                          >
+                            На просчёт
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
               {filteredLinksList.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={12} className="px-4 py-10 text-center text-sm text-gray-400">
                     Нет ссылок по выбранным фильтрам
                   </td>
                 </tr>
@@ -1462,12 +1565,20 @@ export default function ManagementDashboardPage() {
                         {formatGroupedAmounts(groupAmountsByCurrency(doneLinks.filter((l) => !l.executorPaid).map((l) => ({ amount: l.executorCost, currency: projectsList.find((p) => p.id === l.projectId)?.currency }))))}
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => setExecutorReportId(exec.id)}
-                          className="px-2.5 py-1.5 bg-slate-50 text-blue-800 text-xs font-semibold rounded-lg hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap"
-                        >
-                          Отчёт
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setExecutorReportId(exec.id)}
+                            className="px-2.5 py-1.5 bg-slate-50 text-blue-800 text-xs font-semibold rounded-lg hover:bg-slate-100 transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            Отчёт
+                          </button>
+                          <button
+                            onClick={() => setExecutorPaymentId(exec.id)}
+                            className="px-2.5 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-lg hover:bg-emerald-100 transition-colors cursor-pointer whitespace-nowrap"
+                          >
+                            Выплаты
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -2141,37 +2252,11 @@ export default function ManagementDashboardPage() {
                   </td>
                   <td className="px-4 py-3 text-sm text-red-500 font-semibold whitespace-nowrap">{link.deadline} <i className="ri-alarm-warning-line" /></td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center gap-1.5">
-                        <input
-                          value={commentInputs[link.id] || ''}
-                          onChange={(e) => setCommentInputs((prev) => ({ ...prev, [link.id]: e.target.value }))}
-                          placeholder="Комментарий..."
-                          className="px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:border-slate-400 w-40"
-                          maxLength={200}
-                        />
-                        <button
-                          onClick={() => {
-                            const text = commentInputs[link.id];
-                            if (text?.trim()) {
-                              handleAddComment(link.id, text.trim());
-                              setCommentInputs((prev) => ({ ...prev, [link.id]: '' }));
-                            }
-                          }}
-                          className="w-6 h-6 flex items-center justify-center rounded-lg bg-blue-900 text-white hover:bg-blue-800 cursor-pointer"
-                        >
-                          <i className="ri-add-line text-xs" />
-                        </button>
-                      </div>
-                      {link.comments.length > 0 && (
-                        <div className="flex flex-col gap-1">
-                          {link.comments.slice(-2).map((c) => (
-                            <div key={c.id} className="text-[10px] text-gray-500 bg-gray-50 rounded px-2 py-1">
-                              <span className="font-semibold">{c.author}:</span> {c.text}
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                    <div className="flex items-center gap-2">
+                      <LinkComments
+                        comments={link.comments}
+                        onAddComment={(text) => handleAddComment(link.id, text)}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -2918,6 +3003,15 @@ export default function ManagementDashboardPage() {
         />
       )}
       {executorReportId && <ExecutorDetailModal executorId={executorReportId} onClose={() => setExecutorReportId(null)} />}
+      {executorPaymentId && (
+        <ExecutorPaymentModal
+          executorId={executorPaymentId}
+          executorName={usersList.find((u) => u.id === executorPaymentId)?.fullName ?? 'Исполнитель'}
+          linksList={linksList}
+          onClose={() => setExecutorPaymentId(null)}
+          onUpdateLink={handleUpdateLink}
+        />
+      )}
 
       {projectModal.open && (
         <ProjectCreateModal

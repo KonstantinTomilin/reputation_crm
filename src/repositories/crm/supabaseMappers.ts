@@ -15,6 +15,7 @@ import type {
   CRMSettings,
   CRMUser,
   CurrencyCode,
+  LinkComment,
 } from '@/mocks/crm';
 
 type DbUserRole = 'main_admin' | 'client' | 'executor' | 'auditor';
@@ -303,6 +304,60 @@ function normalizeToIsoDateTime(input: string | null | undefined): string | null
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const LINK_COMMENTS_JSON_PREFIX = '__CRM_COMMENTS_JSON__\n';
+
+export function serializeLinkComments(comments: LinkComment[]): string | null {
+  if (!comments.length) return null;
+  const payload = JSON.stringify(comments.slice(-100));
+  return `${LINK_COMMENTS_JSON_PREFIX}${payload}`;
+}
+
+export function deserializeLinkComments(notes: string | null | undefined): LinkComment[] {
+  if (!notes?.trim()) return [];
+  if (notes.startsWith(LINK_COMMENTS_JSON_PREFIX)) {
+    try {
+      const parsed = JSON.parse(notes.slice(LINK_COMMENTS_JSON_PREFIX.length));
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((item) => item && typeof item === 'object')
+          .map((item, index) => ({
+            id: Number((item as LinkComment).id) || index + 1,
+            author: String((item as LinkComment).author ?? 'Система'),
+            authorRole: (item as LinkComment).authorRole ?? 'admin',
+            text: String((item as LinkComment).text ?? ''),
+            createdAt: String((item as LinkComment).createdAt ?? new Date().toISOString().slice(0, 10)),
+          }));
+      }
+    } catch {
+      // fall through to legacy parser
+    }
+  }
+
+  return notes
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const colonIdx = line.indexOf(':');
+      if (colonIdx <= 0) {
+        return {
+          id: index + 1,
+          author: 'Система',
+          authorRole: 'admin' as const,
+          text: line,
+          createdAt: new Date().toISOString().slice(0, 10),
+        };
+      }
+      return {
+        id: index + 1,
+        author: line.slice(0, colonIdx).trim(),
+        authorRole: 'admin' as const,
+        text: line.slice(colonIdx + 1).trim(),
+        createdAt: new Date().toISOString().slice(0, 10),
+      };
+    });
+}
+
 export function isUuid(value: unknown): boolean {
   return typeof value === 'string' && UUID_REGEX.test(value);
 }
@@ -469,7 +524,7 @@ export function mapDbLinkToLink(
     executorPaidAmount: null,
     executorPaymentStatus: row.executor_payment_status,
     isDeleted: Boolean(row.deleted_at),
-    comments: [],
+    comments: deserializeLinkComments(row.notes),
     proofsFolder: null,
     proofFiles: [],
     geo: context?.projectCurrency
@@ -507,7 +562,7 @@ export function mapLinkToDbInsert(
     executor_price: Number(link.executorCost ?? 0),
     currency,
     deadline_at: normalizeToIsoDateTime(link.deadline),
-    notes: link.comments.map((c) => `${c.author}: ${c.text}`).join('\n').slice(0, 2000) || null,
+    notes: serializeLinkComments(link.comments)?.slice(0, 8000) ?? null,
     created_at: normalizeToIsoDateTime(link.addedDate) ?? new Date().toISOString(),
     deleted_at: link.isDeleted ? new Date().toISOString() : null,
   });

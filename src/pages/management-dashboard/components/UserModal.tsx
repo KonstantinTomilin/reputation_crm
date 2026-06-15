@@ -8,6 +8,8 @@ interface UserModalProps {
 }
 
 export default function UserModal({ user, onClose, onSave }: UserModalProps) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     fullName: user?.fullName || '',
     login: user?.login || '',
@@ -122,14 +124,49 @@ export default function UserModal({ user, onClose, onSave }: UserModalProps) {
           </div>
         </div>
 
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {error}
+          </div>
+        )}
+
         <button
+          disabled={saving}
           onClick={async () => {
-            await onSave(form as Omit<CRMUser, 'id'>);
-            onClose();
+            setError(null);
+            if (!form.fullName.trim()) {
+              setError('Укажите ФИО / название.');
+              return;
+            }
+            if (!form.login.trim()) {
+              setError('Укажите логин.');
+              return;
+            }
+            if (!user && !form.password.trim()) {
+              setError('Укажите пароль для входа.');
+              return;
+            }
+            if (!user && form.password.trim().length < 6) {
+              setError('Пароль должен быть не короче 6 символов.');
+              return;
+            }
+            setSaving(true);
+            try {
+              await onSave(form as Omit<CRMUser, 'id'>);
+              onClose();
+            } catch (saveError) {
+              setError(
+                saveError instanceof Error
+                  ? saveError.message
+                  : 'Не удалось сохранить пользователя.'
+              );
+            } finally {
+              setSaving(false);
+            }
           }}
-          className="mt-2 w-full py-2.5 bg-blue-900 text-white text-sm font-semibold rounded-lg hover:bg-blue-800 transition-colors cursor-pointer whitespace-nowrap"
+          className="mt-2 w-full py-2.5 bg-blue-900 text-white text-sm font-semibold rounded-lg hover:bg-blue-800 transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {user ? 'Сохранить изменения' : 'Создать пользователя'}
+          {saving ? 'Сохранение...' : user ? 'Сохранить изменения' : 'Создать пользователя'}
         </button>
       </div>
     </div>

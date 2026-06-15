@@ -6,6 +6,30 @@ import type { CRMAudit, CRMLink } from '@/mocks/crm';
 
 export type AuditReviewStatus = 'на согласовании' | 'согласовано' | 'отправлено клиенту' | 'отклонён';
 
+function getAuditWorkflowStep(link?: CRMLink): string {
+  if (!link) return '—';
+  switch (link.status) {
+    case 'ожидает аудита':
+      return 'Ожидает аудитора';
+    case 'в аудите':
+      return 'В работе у аудитора';
+    case 'на просчёт':
+      return 'Передано исполнителю на просчёт';
+    case 'просчёт выполнен':
+      return 'Просчёт выполнен';
+    case 'аудит выполнен':
+      return 'Аудит выполнен';
+    case 'согласовано':
+      return 'Согласовано';
+    case 'отправлено клиенту':
+      return 'Отправлено клиенту';
+    case 'отклонено':
+      return 'Отклонено';
+    default:
+      return link.status;
+  }
+}
+
 interface AuditWithMeta {
   audit: CRMAudit;
   link?: CRMLink;
@@ -216,6 +240,7 @@ export default function AuditsTab({ linksList, onUpdateLink, onAddComment, onGen
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Клиент</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Проект</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Источник</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Этап передачи</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Статус</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Приоритет</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Удал.</th>
@@ -245,6 +270,11 @@ export default function AuditsTab({ linksList, onUpdateLink, onAddComment, onGen
                           : 'bg-slate-100 text-blue-800'
                       }`}>
                         {source === 'исполнитель' ? 'Исполнитель' : 'Аудитор'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap bg-violet-50 text-violet-700">
+                        {getAuditWorkflowStep(link)}
                       </span>
                     </td>
                     <td className="px-4 py-3">

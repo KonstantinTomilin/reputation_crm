@@ -146,6 +146,14 @@ export async function getCurrentCrmUser(): Promise<SessionUser | null> {
 
 // Stage 2.5 bridge:
 // This operation should be moved to Edge Function with service role.
+function extractEdgeFunctionErrorMessage(data: unknown, fallback: string): string {
+  if (!data || typeof data !== 'object') return fallback;
+  const payload = data as { error?: unknown; message?: unknown };
+  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error;
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message;
+  return fallback;
+}
+
 export async function createAuthUserForCrmUser(input: {
   login: string;
   password: string;
@@ -159,8 +167,14 @@ export async function createAuthUserForCrmUser(input: {
   });
   if (error) {
     throw new Error(
-      `Не удалось создать auth пользователя через Edge Function admin-create-user: ${error.message}`
+      `Не удалось создать пользователя: ${error.message}`
     );
+  }
+  if (data && typeof data === 'object' && 'error' in data && (data as { error?: string }).error) {
+    throw new Error(extractEdgeFunctionErrorMessage(data, 'Не удалось создать пользователя.'));
+  }
+  if (data && typeof data === 'object' && 'ok' in data && !(data as { ok?: boolean }).ok) {
+    throw new Error(extractEdgeFunctionErrorMessage(data, 'Не удалось создать пользователя.'));
   }
   return data;
 }
